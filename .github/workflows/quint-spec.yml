@@ -45,4 +45,4 @@ jobs:
       - name: Run small variants
         run: >-
           make variants WORKERS=4
-          ONLY="noSnapshotClamp noGcWait noBackfillStop setvalRace noDeferDeletes issue11501 issue11502 issue8004"
+          ONLY="noSnapshotClamp noGcWait noBackfillStop setvalRace noDeferDeletes issue11501 issue11502 issue8004 noIndexMark noIndexStamp indexGcNoFloor"

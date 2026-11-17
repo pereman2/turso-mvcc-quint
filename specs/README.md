@@ -13,6 +13,7 @@ result.
 | `MvccPassiveSchema.qnt` | `MvccPassiveSchemaConfigs.qnt` | `DESIGN-schema.md` |
 | `MvccRecovery.qnt` | `MvccRecoveryConfigs.qnt` | `DESIGN-recovery.md` |
 | `MvccGroupCommit.qnt` | `MvccGroupCommitConfigs.qnt` | `DESIGN-group-commit.md` |
+| `MvccPassiveIndex.qnt` | `MvccPassiveIndexConfigs.qnt` | `DESIGN-indexes.md` |
 
 A configurations file has one module for each configuration. The module sets
 the constants of the spec. The module named `main` is the main configuration
@@ -34,7 +35,7 @@ These results are evidence within these bounds and this model, not proof.
 
 ### What is modeled
 
-There are five specs in this folder.
+There are six specs in this folder.
 
 - Rows (`MvccPassiveCheckpoint.qnt`): version chains, the logical log, WAL
   frames, the database file, writers, the checkpoint and GC. The main
@@ -53,6 +54,12 @@ There are five specs in this folder.
   connections, a clock bound of 8 and 2 passes. The sequence is ascending,
   and `setval` is off. TLC explores 4,008,777 states in 3.5 minutes on 3
   workers.
+
+- Index rows (`MvccPassiveIndex.qnt`): one row of a table with an index on
+  `v`, the index chains, the index dirty map, index collection and stamp, the
+  two GC loops, index reads and recovery. The main configuration has values 1
+  and 2, 1 reader, 5 timestamps and 2 checkpoints. TLC explores 52,815,276
+  states in 9 minutes on 8 workers. `DESIGN-indexes.md` gives the design.
 
 - Recovery (`MvccRecovery.qnt`): the checkpoint file steps, crash recovery
   and open, with the row GC rules of modes B and P. It has no readers, schema
@@ -75,8 +82,9 @@ open reader, checkpoint passes that stop before they complete, and mode T.
   is false for the flag off.
 - Mode T (flag on plus `PRAGMA wal_checkpoint(TRUNCATE)`) is only partly
   modeled. WAL restart and the blocking final GC sweep are not in the specs.
-- Index rows. They have their own GC loop, their own dirty map, the lockstep
-  cursor and `rootpage_gc_protected` for indexes.
+- Index rows in modes B and T, index DDL, unique indexes and more than one
+  row. The index spec covers one row and one index in mode P
+  (`DESIGN-indexes.md`).
 - Write-write validation against a GC that drops versions.
 - `finalized_tx_states` pruning.
 - Group commit in the row, schema and sequence specs, where the log append
