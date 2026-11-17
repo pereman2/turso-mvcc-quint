@@ -2,10 +2,10 @@
 
 This document describes the design of the passive checkpoint in MVCC mode, as
 the code implements it today. The Quint model `MvccPassiveCheckpoint.qnt` in
-this directory states the same design formally. Quint checks it with the TLC
+`specs/` states the same design formally. Quint checks it with the TLC
 model checker (`quint verify --backend tlc`). [`FINDINGS.md`](FINDINGS.md)
 lists what the model found, what it only reproduced, and what a Rust run
-refuted. [Scope and limits](README.md#scope-and-limits) says what the model
+refuted. [Scope and limits](../specs/README.md#scope-and-limits) says what the model
 leaves out. The results are evidence within these bounds and this model, not
 proof.
 
@@ -149,16 +149,17 @@ Four reachability checks (`NeverDropsCurrentRow`, `NeverTruncatesLog`,
 reaches each of these states. GC empties a chain. The log is cut. A reader
 reads the B-tree through an old read mark. The WAL is backfilled.
 
-Three more documents cover the other parts. Each has its own spec.
+Four more documents cover the other parts. Each has its own spec.
 
 | Document | Spec | Part |
 |----------|------|------|
 | `DESIGN-rows.md` | `MvccPassiveCheckpoint.qnt` | Aborts, dirty keys and GC samples, added to this row model |
 | `DESIGN-schema.md` | `MvccPassiveSchema.qnt` | Table ids, root pages, the schema cookie, and the open issues they cause |
 | `DESIGN-sequences.md` | `MvccPassiveSequence.qnt` | Sequence rows and their compaction |
+| `DESIGN-recovery.md` | `MvccRecovery.qnt` | Checkpoint file steps, crash recovery and open |
 
-The row model still leaves out indexes, WAL restart, write-write conflicts and
-a checkpoint on the connection of an open reader.
+The row model still leaves out indexes, WAL restart and write-write
+conflicts.
 
 ## Findings
 
@@ -177,7 +178,9 @@ verdicts are in `FINDINGS.md`.
    `ownCheckpointGcBackfillFloor` fails, and a simulator assertion fired in 46
    of 200 seeds. So the reader marks stay in the floor for now. A floor of "lowest pinned read
    mark" passes in the model, including the new path (`ownCheckpointGcPinnedFloor`).
-   A floor of "registered readers only" is not safe (rule R5).
+   A floor of "registered readers only" is not safe (rule R5). The row spec
+   now reaches the state where `backfill_floor` is above a reader's mark
+   (`reachReaderMarkBelowFloor`).
 2. Unverified. Rule 3 may need "no reader open" only because the dual cursor
    looks at the chain twice. When one look decides both sides of a read, TLC
    finds no error with Rule 3 under load. The variant `rule3UnderLoadOneLook`
@@ -196,4 +199,4 @@ verdicts are in `FINDINGS.md`.
 
 ## Run the model
 
-See `README.md`.
+See [`specs/README.md`](../specs/README.md).

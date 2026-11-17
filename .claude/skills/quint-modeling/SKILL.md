@@ -1,28 +1,29 @@
 ---
 name: quint-modeling
-description: Use when you model, check or simplify a Turso concurrency design with Quint (the MVCC passive checkpoint specs in quint/mvcc-passive-checkpoint/), when you turn a model counterexample into a Rust reproducer, when you replay model traces against the engine, or when you decide whether a special case in the MVCC code is needed. Covers spec structure, Fix/guard constants, variant configurations, make targets, Quint pitfalls, model fidelity, and the simplification process.
+description: Use when you model, check or simplify a Turso concurrency design with Quint (the MVCC passive checkpoint specs in specs/), when you turn a model counterexample into a Rust reproducer, when you replay model traces against the engine, or when you decide whether a special case in the MVCC code is needed. Covers spec structure, Fix/guard constants, variant configurations, make targets, Quint pitfalls, model fidelity, and the simplification process.
 ---
 # Modeling MVCC with Quint
 
-The Quint specs in `quint/mvcc-passive-checkpoint/` state the design of the
-MVCC passive checkpoint and check it with TLC. Read `README.md` there for the
-tools and the make targets. Read `DESIGN.md` first for the design. Use this
+The Quint specs in `specs/` state the design of the MVCC passive checkpoint
+and check it with TLC. Read `specs/README.md` for the tools and the make
+targets. Read `docs/DESIGN.md` first for the design. Code paths such as
+`core/mvcc/...` are paths in the turso repo, not in this repo. Use this
 skill to add to the specs, to look for bugs with them, and to make the code
 simpler. A result of the model is evidence within its bounds, not proof, so a
 simpler code needs the checks in "How to delete a guard".
 
-## Files in the spec folder
+## Files in `specs/` and `docs/`
 
 | File | Content |
 |---|---|
-| `Mvcc*.qnt` | One spec for each part: rows and GC, schema and root pages, sequences |
-| `Mvcc*Configs.qnt` | One module for each configuration. `main` is the main configuration |
-| `DESIGN*.md` | The design in prose, each rule mapped to code with `file:line` |
-| `SIMPLIFY.md` | The plan to make the code simpler with the same invariants |
-| `MODEL-GAPS.md` | Each code mechanism, its modes, and whether a spec models it |
-| `FINDINGS.md` | Each claim about a bug or a simplification, with its verdict and evidence |
-| `SYNC.md` | What sync expects from table ids |
-| `HARNESS.md` | The design of the trace replay test |
+| `specs/Mvcc*.qnt` | One spec for each part: rows and GC, schema and root pages, sequences, crash recovery |
+| `specs/Mvcc*Configs.qnt` | One module for each configuration. `main` is the main configuration |
+| `docs/DESIGN*.md` | The design in prose, each rule mapped to code with `file:line` |
+| `docs/SIMPLIFY.md` | The plan to make the code simpler with the same invariants |
+| `docs/MODEL-GAPS.md` | Each code mechanism, its modes, and whether a spec models it |
+| `docs/FINDINGS.md` | Each claim about a bug or a simplification, with its verdict and evidence |
+| `docs/SYNC.md` | What sync expects from table ids |
+| `docs/HARNESS.md` | The design of the trace replay test. The test is in `harness/` |
 
 ## How to model a part of the code
 
@@ -83,7 +84,7 @@ pass lists every invariant of the main configuration.
 
 ## Commands
 
-Run these in `quint/mvcc-passive-checkpoint/`.
+Run these in `specs/`.
 
 | Command | What it does |
 |---|---|
@@ -91,8 +92,9 @@ Run these in `quint/mvcc-passive-checkpoint/`.
 | `make check` | Runs TLC on each `main` module. It must find no error |
 | `make variants` | Runs TLC on each variant. Each must give the result in its comment |
 | `make simulate` | Random walks of each `main` module with the Quint simulator |
-| `make traces` | Writes random ITF traces of each `main` module to `traces/` |
+| `make traces` | Writes random ITF traces of each spec (its `mbt` module if it has one) to `traces/` |
 | `make bug-traces` | Writes one failing ITF trace for each failing variant to `traces/bugs/` |
+| `make recovery` | Runs the main configuration and every variant of the recovery spec |
 
 Use `ONLY="mod1 mod2"` to run some modules, and `SPECS=MvccPassiveSchema` to run
 one spec. With 4 workers, `make check` took 216 s for rows, 215 s for schema
@@ -225,7 +227,7 @@ its actions do not match the code. Use these checks, strongest first.
 
 1. Predictions that come true in Rust. A model bug that a Rust test shows on
    the engine is evidence that the model matches the code on that path.
-2. Trace replay (`HARNESS.md`). A test runs each step of a model trace on a
+2. Trace replay (`docs/HARNESS.md`, run with `harness/run-in-turso.sh`). A test runs each step of a model trace on a
    real database and compares the state after each step. A difference means
    that the model or the code is wrong. Find out which one before you change
    either.

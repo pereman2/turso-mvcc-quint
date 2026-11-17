@@ -1,6 +1,6 @@
 # How sync depends on table ids
 
-The specs in this folder do not model sync. Sync reads the logical log and
+The specs in `specs/` do not model sync. Sync reads the logical log and
 the `rootpage` column of `sqlite_schema`. It uses the same rule as recovery:
 the id of a table is `-rootpage`. So any change to table ids, for example
 step 3 of `SIMPLIFY.md`, must keep sync working. This file records what sync

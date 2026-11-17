@@ -10,7 +10,7 @@ model a checkpoint on the connection of an open reader or a checkpoint that
 stops partway. Rust runs later showed bugs there (#11831 and #11835), so those
 specs missed them. The checkpoint-stop section below gives the later model
 results for both paths, with the Rust probe results. `FINDINGS.md` lists the
-verdicts, and the section "Scope and limits" in `README.md` lists what the
+verdicts, and the section "Scope and limits" in `specs/README.md` lists what the
 specs leave out.
 
 The mechanism table uses code at commit 719fcc411. The checkpoint-stop section
@@ -546,7 +546,7 @@ The backing-root and initial-row requirements above remain not verified in Rust.
 
 ### Verification results
 
-Every command uses `WORKERS=8`. Shards execute one after another in this folder.
+Every command uses `WORKERS=8`. Shards execute one after another in `specs/`.
 The commands set the following values on the make command line:
 
 ```sh

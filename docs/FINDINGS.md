@@ -1,6 +1,6 @@
 # Findings
 
-This file lists each claim that the docs in this folder make about a bug or a simplification, with a verdict and the evidence for it. Each verdict has one of the six meanings in the list below. "Reproduced" means that a variant fails for an issue that people had already reported, and "found" means that the model showed a bug first and a Rust test confirms it. The limits of these results are in [Scope and limits](README.md#scope-and-limits).
+This file lists each claim that the docs in this folder make about a bug or a simplification, with a verdict and the evidence for it. Each verdict has one of the six meanings in the list below. "Reproduced" means that a variant fails for an issue that people had already reported, and "found" means that the model showed a bug first and a Rust test confirms it. The limits of these results are in [Scope and limits](../specs/README.md#scope-and-limits).
 
 - Held up: the model showed the bug first, and a Rust test confirms it.
 - Found by Rust or code reading: a Rust run or a code read showed it. The model came later or not at all.

@@ -349,7 +349,7 @@ reproduced.
   allocated, but nothing names it. The same overwrite also turns published
   roots back into negative ones (`reachOwnedNegative`).
 - #8537, reproduced only with its fix switched off (`issue8537`,
-  `OpenCorrect`). The variant switches S16 off. The code on this branch has
+  `OpenCorrect`). The variant switches S16 off. The code that this file maps has
   S16 (commit 367362427), so the issue looks fixed here.
 - #7960, reproduced (`issue7960`, `KindsMatch`). `Indexes = {i1}` on table
   `t1`, with `FixDisjointIds` and `FixPersistIds` off. `CREATE TABLE t1`

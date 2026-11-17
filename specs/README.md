@@ -1,8 +1,8 @@
 # MVCC Passive Checkpoint Specification
 
-Quint specifications of the passive checkpoint in MVCC mode. `DESIGN.md`
-describes the design in prose and maps it to the Rust code. [`FINDINGS.md`](FINDINGS.md)
-lists each claim about a bug or a simplification, with a verdict and its
+Quint specifications of the passive checkpoint in MVCC mode. The documents
+are in [`docs/`](../docs). `DESIGN.md` describes the design in prose and maps
+it to the Rust code. [`FINDINGS.md`](../docs/FINDINGS.md) lists each claim about a bug or a simplification, with a verdict and its
 evidence. Read [Scope and limits](#scope-and-limits) below before you trust a
 result.
 
@@ -33,7 +33,7 @@ These results are evidence within these bounds and this model, not proof.
 
 ### What is modeled
 
-There are three specs in this folder.
+There are four specs in this folder.
 
 - Rows (`MvccPassiveCheckpoint.qnt`): version chains, the logical log, WAL
   frames, the database file, writers, the checkpoint and GC. The main
@@ -53,16 +53,22 @@ There are three specs in this folder.
   and `setval` is off. TLC explores 4,008,777 states in 3.5 minutes on 3
   workers.
 
-A fourth spec, `MvccRecovery.qnt`, is in PR #11832. It is not in this PR.
+- Recovery (`MvccRecovery.qnt`): the checkpoint file steps, crash recovery
+  and open, with the row GC rules of modes B and P. It has no readers, schema
+  or indexes. `DESIGN-recovery.md` gives its configurations and results.
+
+The row and sequence specs also model a checkpoint on the connection of an
+open reader, checkpoint passes that stop before they complete, and mode T.
+`MODEL-GAPS.md` section 5 gives these results.
 
 ### What is not modeled
 
-- Mode B, the default (flag off). This covers Rule 2 B form, Rule 3 with
+- Mode B, the default (flag off), with readers. This covers Rule 2 B form, Rule 3 with
   `b <= ckpt_max` and the B-tree fall-through read. The "blocking" mode of
   the sequence spec uses the passive GC rules. `MODEL-GAPS.md` says that this
   is false for the flag off.
-- Mode T (flag on plus `PRAGMA wal_checkpoint(TRUNCATE)`). It is only partly
-  modeled, and that part is not merged. It is in PR #11837.
+- Mode T (flag on plus `PRAGMA wal_checkpoint(TRUNCATE)`) is only partly
+  modeled. WAL restart and the blocking final GC sweep are not in the specs.
 - Index rows. They have their own GC loop, their own dirty map, the lockstep
   cursor and `rootpage_gc_protected` for indexes.
 - Write-write validation against a GC that drops versions.
@@ -75,10 +81,9 @@ A fourth spec, `MvccRecovery.qnt`, is in PR #11832. It is not in this PR.
 - Reads of `sqlite_schema` through the dual cursor, and the GC of
   `sqlite_schema`.
 - The statement retry loop.
-- A checkpoint on its own connection, and checkpoints that stop partway. The
-  specs in this PR leave both out. Specs that add them came after the bugs
-  and are not merged. For this reason, the specs here missed #11831 and
-  #11835.
+- A checkpoint on its own connection, and checkpoints that stop partway, in
+  the schema spec. The first specs left both out and missed #11831 and
+  #11835. The row and sequence specs added these paths after the bugs.
 - The sync object map and stable table ids.
 
 ### Bounds
@@ -92,7 +97,8 @@ invisible to it. Larger-bound runs for the deletion of `rootpage_gc_protected`
 
 There is no `PARITY.md` yet. Parity today is the set of manual `file:line`
 tables in `DESIGN*.md` and `MODEL-GAPS.md`, made at commit 719fcc411. The
-replay harness in PR #11779 is not merged. A replay shows that the code can
+replay harness in `harness/` runs only with a patch to turso
+(`docs/HARNESS.md`). A replay shows that the code can
 follow the paths of the model. It never tests paths that the code has and the
 model lacks.
 
@@ -203,8 +209,8 @@ two more fields:
 - `mbt::nondetPicks`: the values that the action picked, under the names of
   the action parameters, for example `k` and `isDelete`.
 
-The test in `core/mvcc/database/mbt_tests/` replays a trace against the
-Rust code with these two fields. `HARNESS.md` describes that test. For a
+The test in `harness/mbt_tests/` replays a trace against the Rust code with
+these two fields. `docs/HARNESS.md` describes that test. For a
 spec with a module named `mbt`, `make traces` uses that module, which takes
 only the steps that the engine can take.
 
