@@ -64,6 +64,12 @@ enum Failure {
     /// `durable_through` or `written_through` of the group commit
     /// coordinator differs from the spec value.
     Watermark,
+    /// A mode B pass returned an error where the spec pass succeeded, or the
+    /// other way.
+    CheckpointResult,
+    /// The engine chain of a key has another number of versions than the
+    /// spec chain, after a GC step or a mode B pass.
+    Chain,
     /// A transaction is Preparing, Committed or rolled back in the engine and
     /// in another state in the spec, or a COMMIT stopped elsewhere.
     TxState,
@@ -267,6 +273,27 @@ impl Checkpointer {
     /// Starts a pass and steps it to the collection of table rows. The
     /// collection yields after `collect_threshold` keys.
     fn start(&mut self, collect_threshold: usize) {
+        self.start_with_mode(
+            collect_threshold,
+            CheckpointMode::Passive {
+                upper_bound_inclusive: None,
+            },
+        );
+        self.step_until(|state| state == CheckpointState::CollectTableRows);
+    }
+
+    /// Creates a mode B pass (a TRUNCATE checkpoint with the flag off). The
+    /// pass takes the blocking lock in its first step.
+    fn start_blocking(&mut self) {
+        self.start_with_mode(
+            usize::MAX,
+            CheckpointMode::Truncate {
+                upper_bound_inclusive: None,
+            },
+        );
+    }
+
+    fn start_with_mode(&mut self, collect_threshold: usize, mode: CheckpointMode) {
         let mut sm = CheckpointStateMachine::new(
             self.conn.pager.load().clone(),
             self.mv.clone(),
@@ -274,13 +301,37 @@ impl Checkpointer {
             false,
             self.conn.get_sync_mode(),
             crate::MAIN_DB_ID,
-            CheckpointMode::Passive {
-                upper_bound_inclusive: None,
-            },
+            mode,
         );
         sm.set_collect_preemption_threshold_for_test(collect_threshold);
         self.sm = Some(sm);
-        self.step_until(|state| state == CheckpointState::CollectTableRows);
+    }
+
+    /// Steps the pass to its end. On an error the state machine has already
+    /// cleaned up (it releases the blocking lock and aborts the WAL
+    /// checkpoint), so the test drops it and returns the error.
+    fn run_to_end(&mut self) -> crate::Result<()> {
+        let sm = self.sm.as_mut().expect("no checkpoint is running");
+        for _ in 0..STEP_LIMIT {
+            match sm.step(&()) {
+                Ok(TransitionResult::Continue) => {}
+                Ok(TransitionResult::Io(io)) => {
+                    if let Err(err) = io.wait(self.io.as_ref()) {
+                        self.sm = None;
+                        return Err(err);
+                    }
+                }
+                Ok(TransitionResult::Done(_)) => {
+                    self.sm = None;
+                    return Ok(());
+                }
+                Err(err) => {
+                    self.sm = None;
+                    return Err(err);
+                }
+            }
+        }
+        panic!("checkpoint did not finish in {STEP_LIMIT} steps");
     }
 
     fn sm(&self) -> &CheckpointStateMachine<MvccClock, DynAllocator> {
@@ -342,6 +393,16 @@ fn crash_probe<T>(
     db_path: &str,
     read: impl FnOnce(&Arc<Connection>) -> crate::Result<T>,
 ) -> Recovery<T> {
+    crash_probe_with_flag(db_path, true, read)
+}
+
+/// `passive` is the value of the passive checkpoint flag that the copy opens
+/// with. Mode B opens with the flag off.
+fn crash_probe_with_flag<T>(
+    db_path: &str,
+    passive: bool,
+    read: impl FnOnce(&Arc<Connection>) -> crate::Result<T>,
+) -> Recovery<T> {
     let source = std::path::Path::new(db_path);
     let name = source.file_name().unwrap().to_str().unwrap();
     let folder = tempfile::TempDir::new().unwrap();
@@ -359,7 +420,7 @@ fn crash_probe<T>(
             io,
             copy.to_str().unwrap(),
             crate::OpenFlags::default(),
-            crate::DatabaseOpts::new().with_experimental_mvcc_passive_checkpoint(true),
+            crate::DatabaseOpts::new().with_experimental_mvcc_passive_checkpoint(passive),
             None,
             Arc::new(crate::EngineDialect),
         )?;

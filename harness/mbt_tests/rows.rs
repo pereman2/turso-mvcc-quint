@@ -51,6 +51,8 @@ pub(super) struct RowDriver {
     frames_before_seq: BTreeMap<u32, u64>,
     /// Checkpoint sequence and max frame of the WAL at the last look.
     last_wal: (u32, u64),
+    /// Mode B: the passive checkpoint flag is off, and a pass is one spec step.
+    blocking: bool,
 }
 
 impl Driver for RowDriver {
@@ -64,6 +66,8 @@ impl Driver for RowDriver {
             "ReaderReadStart" => self.reader_read_start(step)?,
             "ReaderReadEnd" => self.reader_read_end(step)?,
             "ReaderEnd" => self.reader_end(step)?,
+            "CheckpointBlocking" => self.checkpoint_blocking(step, false)?,
+            "CheckpointBlockingFail" => self.checkpoint_blocking(step, true)?,
             "CheckpointStart" => self.checkpoint_start(step)?,
             "CheckpointCollect" => self.checkpoint_collect(step)?,
             "CheckpointBeginPager" => self.checkpoint_begin_pager(step)?,
@@ -80,6 +84,14 @@ impl Driver for RowDriver {
             "Gc" => self.gc(step)?,
             other => return refuse(format!("no engine operation for {other}")),
         }
+        if self.blocking
+            && matches!(
+                step.action.as_str(),
+                "Gc" | "CheckpointBlocking" | "CheckpointBlockingFail"
+            )
+        {
+            self.check_chains(step)?;
+        }
         self.check(step)?;
         if step.action.starts_with("Write") || step.action.starts_with("Checkpoint") {
             self.check_recovery(step)?;
@@ -93,10 +105,23 @@ impl RowDriver {
         Self::with_schema(&["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"])
     }
 
+    /// A driver for mode B: the passive checkpoint flag is off.
+    pub(super) fn new_blocking() -> Self {
+        Self::with_mode(&["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"], true)
+    }
+
     /// A driver for table `t` of `schema`, which must have an integer
     /// primary key `k` and an integer column `v`.
     pub(super) fn with_schema(schema: &[&str]) -> Self {
-        let db = MvccTestDbNoConn::new_with_random_db_passive();
+        Self::with_mode(schema, false)
+    }
+
+    fn with_mode(schema: &[&str], blocking: bool) -> Self {
+        let db = if blocking {
+            MvccTestDbNoConn::new_with_random_db()
+        } else {
+            MvccTestDbNoConn::new_with_random_db_passive()
+        };
         let setup = db.connect();
         for sql in schema {
             setup.execute(sql).unwrap();
@@ -131,6 +156,7 @@ impl RowDriver {
             frames: Vec::new(),
             frames_before_seq: BTreeMap::new(),
             last_wal: (0, 0),
+            blocking,
         };
         driver
             .engine_ts
@@ -294,6 +320,30 @@ impl RowDriver {
                     "reader {name} read k{key} at begin {begin}: got {got}, spec oracle {want}"
                 ),
             );
+        }
+        if self.blocking {
+            // A scan goes through the other look of the dual cursor.
+            let writes = step.var("writes");
+            let mut want_rows: BTreeMap<i64, i64> = BTreeMap::new();
+            for write in writes.items() {
+                let k = spec_key(write.field("k"));
+                let v = latest_in(writes, k, begin);
+                if v != 0 {
+                    want_rows.insert(k, v);
+                }
+            }
+            let got_rows: BTreeMap<i64, i64> = get_rows(&reader.conn, "SELECT k, v FROM t")
+                .iter()
+                .map(|row| (row[0].as_int().unwrap(), row[1].as_int().unwrap()))
+                .collect();
+            if got_rows != want_rows {
+                return fail(
+                    Failure::WrongRead,
+                    format!(
+                        "reader {name} scanned at begin {begin}: got {got_rows:?}, spec oracle {want_rows:?}"
+                    ),
+                );
+            }
         }
         Ok(())
     }
@@ -471,6 +521,93 @@ impl RowDriver {
         Ok(())
     }
 
+    /// A mode B pass, one spec step. `fails` is a pass that stops at
+    /// `CheckpointWal` after its publish, because a pager reader holds a WAL
+    /// read mark. The test cannot inject an I/O error there, so it refuses
+    /// such a trace when no reader is pinned.
+    fn checkpoint_blocking(&mut self, step: &Step, fails: bool) -> StepOutcome {
+        if !self.blocking {
+            return refuse("a mode B action in a trace for the passive flag");
+        }
+        let pinned = step
+            .var("rd")
+            .entries()
+            .iter()
+            .any(|(_, state)| state.field("pinned").bool());
+        if fails && !pinned {
+            return refuse("CheckpointBlockingFail without a pinned reader needs an I/O error");
+        }
+        let spec_wrote = step.var("wal").items().len() > self.frames.len() - 1;
+        self.ck.start_blocking();
+        let wrote = self.ck.commit();
+        if wrote != spec_wrote {
+            return fail(
+                Failure::Frame,
+                format!("spec wrote a frame: {spec_wrote}, engine: {wrote}"),
+            );
+        }
+        if wrote {
+            let max_frame = self.max_frame();
+            self.frames.push(max_frame);
+        }
+        match (fails, self.ck.run_to_end()) {
+            (false, Ok(())) | (true, Err(crate::LimboError::Busy)) => {}
+            (false, Err(err)) => {
+                return fail(
+                    Failure::CheckpointResult,
+                    format!("the spec pass succeeds, the engine pass returned {err}"),
+                );
+            }
+            (true, other) => {
+                return fail(
+                    Failure::CheckpointResult,
+                    format!("the spec pass stops after its publish, the engine returned {other:?}"),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Mode B: compares the number of versions of every key. The engine count
+    /// is the length of the chain in `rows`. It includes committed versions,
+    /// Preparing versions and the begin-None marker of a row that only the
+    /// B-tree had. The spec count is the size of `chain[k]`, which has the same
+    /// kinds of versions. With no failed pass before it, a pass that succeeds
+    /// empties every chain in both, so this check also covers
+    /// BlockingStoreEmpty. After a failed pass, the versions left are compared.
+    fn check_chains(&self, step: &Step) -> StepOutcome {
+        for (key, versions) in step.var("chain").entries() {
+            let key = spec_key(key);
+            let spec = versions.items().len();
+            let (engine, dump) =
+                self.mv
+                    .rows
+                    .get(&self.row_id(key))
+                    .map_or((0, String::new()), |entry| {
+                        let versions = entry.value().read();
+                        (
+                            versions.len(),
+                            versions
+                                .iter()
+                                .map(|v| format!("[{:?} {:?}]", v.begin(), v.end()))
+                                .collect::<String>(),
+                        )
+                    });
+            if spec != engine {
+                return fail(
+                    Failure::Chain,
+                    format!(
+                        "k{key}: spec chain has {spec} versions, engine chain has {engine} {dump}, \
+                         lwm {}, durable_txid_max {}",
+                        self.mv.sample_gc_lwm(),
+                        self.mv.durable_txid_max.load(Ordering::SeqCst)
+                    ),
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn checkpoint_backfill(&mut self, _step: &Step) -> StepOutcome {
         self.ck
             .step_until(|state| state == CheckpointState::TruncateLogicalLog);
@@ -564,7 +701,9 @@ impl RowDriver {
             .filter(|(_, value)| *value != 0)
             .collect();
         let path = self.db.path.as_ref().unwrap();
-        let got = match crash_probe(path, |conn| query_rows(conn, "SELECT k, v FROM t")) {
+        let got = match crash_probe_with_flag(path, !self.blocking, |conn| {
+            query_rows(conn, "SELECT k, v FROM t")
+        }) {
             Recovery::Read(rows) => rows
                 .iter()
                 .map(|row| (row[0].as_int().unwrap(), row[1].as_int().unwrap()))
@@ -708,4 +847,154 @@ fn row_traces_from_folder() {
         paths.len() - refused - failed
     );
     assert_eq!(failed, 0);
+}
+
+/// Replays every trace in the folder `MBT_TRACES` on the mode B engine (the
+/// passive flag off), for the traces of `make traces SPECS=MvccPassiveCheckpoint MBT=mbtBlocking`. Run it
+/// with `cargo test mbt_tests -- --ignored`.
+#[test]
+#[ignore]
+fn blocking_row_traces_from_folder() {
+    let folder = std::env::var("MBT_TRACES").expect("set MBT_TRACES to a folder of traces");
+    let mut paths: Vec<_> = std::fs::read_dir(folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.to_string_lossy().ends_with(".itf.json"))
+        .collect();
+    paths.sort();
+    let (mut refused, mut failed) = (0, 0);
+    for path in &paths {
+        let trace = std::fs::read_to_string(path).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let result = std::panic::catch_unwind(|| {
+            replay(
+                &name,
+                &trace,
+                Expect::Conforms,
+                &mut RowDriver::new_blocking(),
+            )
+        });
+        match result {
+            Ok(Replay::Done) => println!("TRACE {name}: replayed"),
+            Ok(Replay::Refused) => {
+                refused += 1;
+                println!("TRACE {name}: refused");
+            }
+            Err(_) => {
+                failed += 1;
+                println!("TRACE {name}: failed");
+            }
+        }
+    }
+    println!(
+        "{} traces: {} replayed, {refused} refused, {failed} failed",
+        paths.len(),
+        paths.len() - refused - failed
+    );
+    assert_eq!(failed, 0);
+}
+
+/// The bug trace of the variant `blockingPagerPin`: a pager reader pins a WAL
+/// read mark and holds no gate, so a pass fails after its publish, GC drops
+/// the delete, and the reader reads the old B-tree row. The step number is
+/// the read of that reader.
+#[test]
+fn blocking_pager_pin_trace_shows_wrong_read() {
+    let replayed = replay(
+        "MvccPassiveCheckpoint-blockingPagerPin",
+        include_str!("traces/MvccPassiveCheckpoint-blockingPagerPin.itf.json"),
+        Expect::Violation {
+            step: 16,
+            kind: Failure::WrongRead,
+        },
+        &mut RowDriver::new_blocking(),
+    );
+    assert_eq!(replayed, Replay::Done);
+}
+
+/// Traces of the mbtBlocking module from `make traces SPECS=MvccPassiveCheckpoint
+/// MBT=mbtBlocking`. After each `Gc` and each B pass, the replay compares the
+/// version count of every key with the spec chain (`check_chains`).
+///
+/// Directed traces, from `make traces` of the modules `mbtBlocking` and
+/// `mbtBlockingPin` (the second one has `PagerPinsWithoutGate`):
+/// - rows-blocking-gc-read-13: a `Gc` step drops a superseded version while a
+///   reader is open, and the reader then reads that key.
+/// - rows-blocking-pin-171: the same, and a `CheckpointBlockingFail` is
+///   followed by a `CheckpointBlocking` that leaves a version in the store.
+/// - rows-blocking-fail-then-pass-220: a `CheckpointBlockingFail`, then a
+///   `CheckpointBlocking` that leaves a version in the store.
+/// The failed pass comes from a pager pin that holds no gate, because the
+/// driver cannot inject an I/O error.
+const GENERATED_BLOCKING_ROW_TRACES: [(&str, &str); 8] = [
+    (
+        "rows-blocking-7",
+        include_str!("traces/rows-blocking-7.itf.json"),
+    ),
+    (
+        "rows-blocking-15",
+        include_str!("traces/rows-blocking-15.itf.json"),
+    ),
+    (
+        "rows-blocking-24",
+        include_str!("traces/rows-blocking-24.itf.json"),
+    ),
+    (
+        "rows-blocking-32",
+        include_str!("traces/rows-blocking-32.itf.json"),
+    ),
+    (
+        "rows-blocking-39",
+        include_str!("traces/rows-blocking-39.itf.json"),
+    ),
+    (
+        "rows-blocking-gc-read-13",
+        include_str!("traces/rows-blocking-gc-read-13.itf.json"),
+    ),
+    (
+        "rows-blocking-pin-171",
+        include_str!("traces/rows-blocking-pin-171.itf.json"),
+    ),
+    (
+        "rows-blocking-fail-then-pass-220",
+        include_str!("traces/rows-blocking-fail-then-pass-220.itf.json"),
+    ),
+];
+
+#[test]
+fn generated_blocking_row_traces_conform() {
+    let mut replayed = 0;
+    for (name, trace) in GENERATED_BLOCKING_ROW_TRACES {
+        if replay(
+            name,
+            trace,
+            Expect::Conforms,
+            &mut RowDriver::new_blocking(),
+        ) == Replay::Done
+        {
+            replayed += 1;
+        }
+    }
+    assert!(
+        replayed == GENERATED_BLOCKING_ROW_TRACES.len(),
+        "only {replayed} traces replayed: a change to the driver or the engine refuses more traces"
+    );
+}
+
+/// Negative control for the chain check. The bug trace of the variant
+/// `blockingNoB2Keep` has a `Gc` step where the spec drops the delete marker
+/// of a row that only the B-tree has. The engine keeps it (the keep clause of
+/// Rule 2, B form). So the version counts differ at that step.
+#[test]
+fn blocking_no_b2_keep_trace_fails_the_chain_check() {
+    let replayed = replay(
+        "MvccPassiveCheckpoint-blockingNoB2Keep",
+        include_str!("traces/MvccPassiveCheckpoint-blockingNoB2Keep.itf.json"),
+        Expect::Violation {
+            step: 11,
+            kind: Failure::Chain,
+        },
+        &mut RowDriver::new_blocking(),
+    );
+    assert_eq!(replayed, Replay::Done);
 }
