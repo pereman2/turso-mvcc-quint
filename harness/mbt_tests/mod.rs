@@ -3,6 +3,7 @@
 //! each step the test compares the engine state with the state of the trace.
 //! quint/mvcc-passive-checkpoint/HARNESS.md describes the design.
 
+mod group;
 mod itf;
 mod rows;
 mod schema;
@@ -59,6 +60,20 @@ enum Failure {
     RecoveryPanic,
     /// The schema cookie in the global header is below the shared schema.
     CookieBehind,
+    /// `durable_through` or `written_through` of the group commit
+    /// coordinator differs from the spec value.
+    Watermark,
+    /// A transaction is Preparing, Committed or rolled back in the engine and
+    /// in another state in the spec, or a COMMIT stopped elsewhere.
+    TxState,
+    /// The spec commit lock is free and the engine commit lock is held.
+    CommitLock,
+    /// A FULL COMMIT returned success, and a power loss now loses it.
+    AckNotDurable,
+    /// A FULL transaction is Committed, and a power loss now loses it.
+    CommittedNotDurable,
+    /// A process crash now replays a rolled-back transaction.
+    RolledBackReplayed,
 }
 
 /// Why a replay stopped before the end of the trace.
@@ -89,6 +104,11 @@ fn fail(kind: Failure, detail: impl Into<String>) -> StepOutcome {
 /// checks the state after it.
 trait Driver {
     fn run_step(&mut self, index: usize, step: &Step) -> StepOutcome;
+
+    /// Runs after the last step when no step stopped the replay.
+    fn finish(&mut self) -> StepOutcome {
+        Ok(())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -105,6 +125,11 @@ fn replay(name: &str, trace: &str, expect: Expect, driver: &mut dyn Driver) -> R
         if let Err(s) = driver.run_step(index, step) {
             stop = Some((index, s));
             break;
+        }
+    }
+    if stop.is_none() {
+        if let Err(s) = driver.finish() {
+            stop = Some((steps.len() - 1, s));
         }
     }
     match (expect, stop) {

@@ -39,6 +39,7 @@ only offline, from `specs/Makefile`.
 | `mbt_tests/itf.rs` | The ITF parser, with `serde_json` |
 | `mbt_tests/rows.rs` | The actions of `MvccPassiveCheckpoint` |
 | `mbt_tests/schema.rs` | The actions of `MvccPassiveSchema` that the bug traces use |
+| `mbt_tests/group.rs` | The actions of `MvccGroupCommit`, on a test IO that keeps the fsynced bytes of each file. `DESIGN-group-commit.md` describes it |
 | `mbt_tests/traces/*.itf.json` | The committed traces |
 
 To run it from the root of this repo:
