@@ -1,5 +1,5 @@
 diff --git a/core/mvcc/database/checkpoint_state_machine.rs b/core/mvcc/database/checkpoint_state_machine.rs
-index 5aca97644..463dd5c75 100644
+index 5aca97644..79647ff11 100644
 --- a/core/mvcc/database/checkpoint_state_machine.rs
 +++ b/core/mvcc/database/checkpoint_state_machine.rs
 @@ -356,6 +356,9 @@ pub struct CheckpointStateMachine<Clock: LogicalClock, A: ConcurrentAllocator =
@@ -21,7 +21,7 @@ index 5aca97644..463dd5c75 100644
              collect_table_phase: CollectTablePhase::Schema,
              collect_index_tableid_cursor: None,
              collect_index_key_cursor: None,
-@@ -1010,6 +1015,41 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
+@@ -1010,6 +1015,58 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
          self.state
      }
  
@@ -49,6 +49,23 @@ index 5aca97644..463dd5c75 100644
 +            .collect()
 +    }
 +
++    /// The collected index rows, each with true for a delete.
++    #[cfg(test)]
++    pub(crate) fn collected_index_rows_for_test(&self) -> std::vec::Vec<(RowID, bool)> {
++        self.index_write_set
++            .iter()
++            .map(|(row_id, _, is_delete)| (row_id.clone(), *is_delete))
++            .collect()
++    }
++
++    /// The index keys that changed since the last checkpoint but need no write.
++    #[cfg(test)]
++    pub(crate) fn unwritten_index_rows_for_test(
++        &self,
++    ) -> std::vec::Vec<(MVTableId, Arc<SortableIndexKey>)> {
++        self.unwritten_index_rows.iter().cloned().collect()
++    }
++
 +    fn collect_preemption_threshold(&self) -> usize {
 +        #[cfg(test)]
 +        {
@@ -63,7 +80,7 @@ index 5aca97644..463dd5c75 100644
      #[cfg(test)]
      pub(crate) fn checkpoint_bounds_for_test(&self) -> (Option<u64>, u64) {
          (
-@@ -1312,6 +1352,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
+@@ -1312,6 +1369,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
  
      fn collect_table_rows_from_store(&mut self, processed: &mut usize) -> Result<bool> {
          let bounds = self.collect_table_bounds();
@@ -71,7 +88,7 @@ index 5aca97644..463dd5c75 100644
          let mvstore = self.mvstore.clone();
          let guard = epoch::pin();
          let mut cursor = std::mem::take(&mut self.collect_table_cursor);
-@@ -1320,7 +1361,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
+@@ -1320,7 +1378,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
              let row_versions = chain.read();
              self.collect_table_row_versions(key, &row_versions)?;
              *processed += 1;
@@ -80,7 +97,7 @@ index 5aca97644..463dd5c75 100644
          });
          self.collect_table_cursor = cursor;
          result
-@@ -1328,6 +1369,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
+@@ -1328,6 +1386,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
  
      fn collect_table_rows_from_dirty_keys(&mut self, processed: &mut usize) -> Result<bool> {
          let bounds = self.collect_table_bounds();
@@ -88,7 +105,7 @@ index 5aca97644..463dd5c75 100644
          let mvstore = self.mvstore.clone();
          let guard = epoch::pin();
          let mut rows = LockstepCursor::new(&mvstore.rows, &guard);
-@@ -1345,7 +1387,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
+@@ -1345,7 +1404,7 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CheckpointStateMachine<Clock,
                      let row_versions = chain.read();
                      self.collect_table_row_versions(key, &row_versions)?;
                  }
@@ -97,7 +114,7 @@ index 5aca97644..463dd5c75 100644
              },
          );
          self.collect_table_cursor = cursor;
-@@ -4687,6 +4729,40 @@ mod tests {
+@@ -4687,6 +4746,40 @@ mod tests {
          assert_eq!(checkpoint.write_set[0].0.row_id, RowKey::Int(5));
      }
  

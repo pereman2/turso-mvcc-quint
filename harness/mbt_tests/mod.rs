@@ -4,6 +4,7 @@
 //! quint/mvcc-passive-checkpoint/HARNESS.md describes the design.
 
 mod group;
+mod index;
 mod itf;
 mod rows;
 mod schema;
