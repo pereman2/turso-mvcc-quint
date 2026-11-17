@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::itf::Step;
+use super::itf::{Itf, Step};
 use super::*;
 
 /// The DDL transaction between DdlExec and DdlFinish.
@@ -37,6 +37,16 @@ pub(super) struct SchemaDriver {
     /// spec table.
     schema_rowids: HashMap<String, i64>,
     table_ids: HashMap<String, MVTableId>,
+    /// The lwm and the floor that GcSample took for the GC call in progress.
+    gc_sample: Option<(u64, WalPos)>,
+}
+
+/// The owner of the pass, or "" in a trace from before the owner path.
+fn ck_owner(step: &Step) -> &str {
+    match step.var("ck") {
+        Itf::Rec(fields) => fields.get("owner").map_or("", |o| o.str()),
+        _ => "",
+    }
 }
 
 impl Driver for SchemaDriver {
@@ -53,7 +63,24 @@ impl Driver for SchemaDriver {
             "ReaderEnd" => self.reader_end(step),
             "GcCatalog" => self.gc_catalog(step)?,
             "Gc" => self.gc_row(step)?,
-            "CheckpointStart" => self.ck.start(usize::MAX),
+            "GcSample" => self.gc_sample(),
+            "GcApply" => self.gc_apply(step, false)?,
+            "GcApplyCatalog" => self.gc_apply(step, true)?,
+            "GcEnd" => self.gc_sample = None,
+            "GcIndexPhase"
+            | "InnerCommitCheckpoint"
+            | "CheckpointPublishRoots"
+            | "CheckpointPublishHeader"
+            | "CheckpointPublishSchema"
+            | "CheckpointPublishGen" => {
+                return refuse(format!("no engine operation for {}", step.action));
+            }
+            "CheckpointStart" => {
+                if ck_owner(step) != "" {
+                    return refuse("a checkpoint on the connection of a spec reader");
+                }
+                self.ck.start(usize::MAX)
+            }
             "CheckpointObj" => self.checkpoint_obj(step)?,
             "CheckpointCommit" => self.checkpoint_commit(step)?,
             "CheckpointPublish" => self
@@ -109,6 +136,7 @@ impl SchemaDriver {
             readers: HashMap::new(),
             schema_rowids: HashMap::new(),
             table_ids: HashMap::new(),
+            gc_sample: None,
         }
     }
 
@@ -331,8 +359,19 @@ impl SchemaDriver {
     fn gc_chain(&mut self, table: &str, row_id: RowID) -> StepOutcome {
         let mv = &self.ck.mv;
         let lwm = mv.sample_gc_lwm();
-        let ckpt_max = mv.durable_txid_max.load(Ordering::SeqCst);
         let floor = mv.compute_min_reader_mark().min(*mv.backfill_floor.read());
+        self.gc_chain_with(table, row_id, lwm, floor)
+    }
+
+    fn gc_chain_with(
+        &mut self,
+        table: &str,
+        row_id: RowID,
+        lwm: u64,
+        floor: WalPos,
+    ) -> StepOutcome {
+        let mv = &self.ck.mv;
+        let ckpt_max = mv.durable_txid_max.load(Ordering::SeqCst);
         if let Some(entry) = mv.rows.get(&row_id) {
             let mut versions = entry.value().write();
             mv.gc_chain_now(&mut versions, lwm, ckpt_max, floor, true);
@@ -347,6 +386,33 @@ impl SchemaDriver {
             }
         }
         Ok(())
+    }
+
+    /// GcSample: the lwm and the floor of gc_incremental, before any chain lock.
+    fn gc_sample(&mut self) {
+        let mv = &self.ck.mv;
+        let lwm = mv.sample_gc_lwm();
+        let floor = mv.compute_min_reader_mark().min(*mv.backfill_floor.read());
+        self.gc_sample = Some((lwm, floor));
+    }
+
+    /// GcApply and GcApplyCatalog: one chain with the values of GcSample.
+    fn gc_apply(&mut self, step: &Step, catalog: bool) -> StepOutcome {
+        let (lwm, floor) = self.gc_sample.expect("GcApply without GcSample");
+        let table = step.pick("o").str();
+        let row_id = if catalog {
+            RowID::new(
+                SQLITE_SCHEMA_MVCC_TABLE_ID,
+                RowKey::Int(self.schema_rowids[table]),
+            )
+        } else {
+            let table_id = self.table_ids[table];
+            if self.ck.mv.rootpage_gc_protected(&table_id, floor) {
+                return refuse("rootpage_gc_protected keeps the row of a table");
+            }
+            RowID::new(table_id, RowKey::Int(1))
+        };
+        self.gc_chain_with(table, row_id, lwm, floor)
     }
 
     fn write_row(&mut self, step: &Step) -> StepOutcome {
