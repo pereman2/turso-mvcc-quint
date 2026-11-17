@@ -7,8 +7,8 @@ Each iteration runs one heavy job at `nice -n 10`, in turn:
            of copies of each main configuration with larger bounds.
   traces   fresh random traces of the row spec (`mbt` and a larger copy),
            replayed on the engine by `row_traces_from_folder`.
-  group    fresh random traces of the group commit spec (`mbt`), replayed
-           by `group_traces_from_folder`.
+  mbt      fresh random traces of the `mbt` module of each other spec with a
+           replay test (group commit, index rows), replayed on the engine.
   witness  targeted searches: each witness is the negation of an interesting
            state, so the simulator must reach it. Row witness traces are
            replayed on the engine. Recovery and abort witnesses are checked
@@ -288,6 +288,12 @@ def replay_binary(stats):
 REPLAY_TESTS = {
     "MvccPassiveCheckpoint": "mbt_tests::rows::row_traces_from_folder",
     "MvccGroupCommit": "mbt_tests::group::group_traces_from_folder",
+    "MvccPassiveIndex": "mbt_tests::index::index_traces_from_folder",
+}
+
+# Divergence messages of known harness holes, with the gap that records each.
+KNOWN_HOLES = {
+    "did not stop in": "MODEL-GAPS 23 (group replay waits for a park, the engine yields)",
 }
 
 
@@ -299,6 +305,8 @@ def replay(stats, folder, label, spec="MvccPassiveCheckpoint"):
     code, out = run([binary, REPLAY_TESTS[spec], "--ignored",
                      "--nocapture", "--test-threads", "1"], cwd=os.path.join(TURSO, "core"),
                     env=env, timeout=JOB_TIMEOUT * 2)
+    with open(os.path.join(folder, "replay.log"), "w") as f:
+        f.write(out)
     total = len(glob.glob(os.path.join(folder, "*.itf.json")))
     rows = re.findall(r"(\d+) traces: (\d+) replayed, (\d+) refused, (\d+) failed", out)
     group = re.findall(r"(\d+) traces replayed, (\d+) refused", out)
@@ -326,7 +334,12 @@ def replay(stats, folder, label, spec="MvccPassiveCheckpoint"):
         if os.path.exists(src):
             os.makedirs(os.path.dirname(keep), exist_ok=True)
             shutil.copy(src, keep)
-        log(f"DIVERGENCE {label} trace={keep if os.path.exists(keep) else src}: {msg}")
+        hole = next((gap for text, gap in KNOWN_HOLES.items() if text in msg), None)
+        if hole:
+            log(f"known hole {label}: {msg} [{hole}] output={folder}/replay.log")
+        else:
+            log(f"DIVERGENCE {label} trace={keep if os.path.exists(keep) else src}: {msg} "
+                f"output={folder}/replay.log")
     for m in re.finditer(r"([^\s:]+): refused at step (\d+): ([^\n]*)", out):
         log(f"refused {label} {m.group(1)} step {m.group(2)}: {m.group(3)}")
 
@@ -397,18 +410,23 @@ def row_traces(stats, rng, label, path, module, count, steps, safety=ROW_SAFETY,
     return folder
 
 
-def job_group(stats, rng, it):
-    path = os.path.join(SPECS, "MvccGroupCommitConfigs.qnt")
-    if not os.path.exists(path) or "group_traces_from_folder" not in open(
-            os.path.join(REPO, "harness", "mbt_tests", "group.rs")).read():
-        return
-    invs = dict((m, i) for m, _, i in configs(path)).get("mbt")
-    for steps in rng.sample([30, 60, 100], 2):
-        label = f"group-it{it}-steps{steps}"
+def job_specs_mbt(stats, rng, it):
+    """Fresh traces of the mbt module of every spec other than rows that has
+    a replay test, replayed on the engine."""
+    for spec, test in REPLAY_TESTS.items():
+        path = os.path.join(SPECS, f"{spec}Configs.qnt")
+        src = os.path.join(REPO, "harness", "mbt_tests", test.split("::")[1] + ".rs")
+        if spec == "MvccPassiveCheckpoint" or not os.path.exists(path) or not os.path.exists(src):
+            continue
+        invs = dict((m, i) for m, _, i in configs(path)).get("mbt")
+        if not invs:
+            continue
+        steps = rng.choice([30, 60, 100])
+        label = f"{spec}-it{it}-steps{steps}"
         folder = row_traces(stats, rng, label, path, "mbt", rng.choice([600, 900]), steps,
-                            safety=invs, spec="MvccGroupCommit", prefix="MvccGroupCommit-")
+                            safety=invs, spec=spec, prefix=f"{spec}-")
         if folder:
-            replay(stats, folder, label, spec="MvccGroupCommit")
+            replay(stats, folder, label, spec=spec)
         if stop_requested():
             return
 
@@ -535,7 +553,7 @@ def main():
     os.makedirs(os.path.join(OUT, "run"), exist_ok=True)
     stats = load_stats()
     rng = random.Random(int.from_bytes(os.urandom(8), "little"))
-    jobs = [("traces", job_traces), ("sim", job_sim), ("group", job_group), ("witness", job_witness),
+    jobs = [("traces", job_traces), ("sim", job_sim), ("mbt", job_specs_mbt), ("witness", job_witness),
             ("verify", job_verify)]
     log(f"start pid={os.getpid()} repo={REPO} turso={TURSO}")
     while not stop_requested():
