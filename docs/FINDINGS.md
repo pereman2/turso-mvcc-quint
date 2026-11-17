@@ -135,6 +135,18 @@ says otherwise.
   on a stale mark. All replay with no divergence.
 - 2026-11-17, recovery spec, lead `leadA`. Reproduced on turso main as the
   engine bug above.
+- 2026-11-17, 17:43 to 20:49 CET, `scripts/explore.py`, 20 iterations at
+  one heavy job at a time. Engine replay of fresh traces: 6384 row traces
+  (768000 states) with 84 witness traces among them, 1800 index traces
+  (181800 states), and 1499 group commit traces (50042 states). Simulation:
+  about 1.25 million random runs over the six specs, main configurations,
+  random no-error variants and copies with larger bounds. TLC of the main
+  configurations: rows 17,344,980, index 52,815,276 and sequence 1,407,267
+  distinct states, no error. Apalache to depth 3 to 8: group commit, schema
+  and recovery, no error. No invariant violation. One divergence, a harness
+  hole in the group commit replay (`MODEL-GAPS.md` item 23), fixed in
+  6ee4dd5. Gap lead 22 (a checkpoint inside the TxID rewrite) does not
+  show on turso main.
 - 2026-11-17, recovery spec, leads `idea2` and `idea2Passive`. Reproduced on
   turso main with an I/O fault. This is the known bug of open PR #11835, so
   it is in finding 5, not a new report.
