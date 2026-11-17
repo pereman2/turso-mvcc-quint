@@ -11,7 +11,7 @@ This file lists each claim that the docs in this folder make about a bug or a si
 
 A claim that has no Rust test stays a lead. Every result is evidence within the bounds of the model, not proof.
 
-Counts: 3 held up, 5 found by Rust or code reading, 1 refuted, 5 unverified, 11 reproduced known issues (in 4 rows), and 1 simplification evidence.
+Counts: 4 held up, 5 found by Rust or code reading, 1 refuted, 4 unverified, 11 reproduced known issues (in 4 rows), and 1 simplification evidence.
 
 The state counts below come from the docs in this folder. `make bug-traces ONLY=<variant>` writes the trace of a variant to `traces/bugs/<Spec>-<variant>.itf.json`. The trace files are not in git.
 
@@ -29,10 +29,101 @@ The state counts below come from the docs in this folder. `make bug-traces ONLY=
 | 10 | Rule 3 can run under load if a read looks at the chain once. | `DESIGN.md`, Findings 2 | Unverified | `rule3UnderLoadOneLook` passes with 1 key (20,771,050 states). The model does not model a real scan over the skip list. That needs its own design and model. |
 | 11 | The `begin_tx` window between `wal_pos()` and the clock lock is real. | `DESIGN.md`, Findings 3, rule R5 | Unverified | `floorRegistered` fails `ReadsCorrect` (109,005 states). This is a real counterexample of the model. No Rust test shows it. |
 | 12 | #11834: a failed log truncate loses the next commit. | PR #11832 | Unverified | PR #11832 lists `logTruncError`, which fails `RecoveryCorrect`, and says that a Rust test fails on main. The model commit (Nov 13, 23:23 CET) came before the Rust fix (Nov 14, 00:47 CET). Which one came first in discovery is not recorded. The spec is not merged. [PR #11834](https://github.com/tursodatabase/turso/pull/11834) |
-| 13 | Lead A: a read-only open of a closed passive database fails ("bug 9"). | PR #11832 | Unverified | `leadA` fails `OpenSucceeds`. The PR says that a Rust test exists, but the test is not in any PR. The fix waits on design decision D1. [PR #11832](https://github.com/tursodatabase/turso/pull/11832) |
+| 13 | Lead A: a read-only open of a closed passive database fails ("bug 9"). | PR #11832 | Held up | `leadA` fails `OpenSucceeds`. The Rust test in [Engine bug: read-only open after a passive checkpoint](#engine-bug-read-only-open-after-a-passive-checkpoint) fails 3 of 3 runs on turso main at ae2cb7388. The fix waits on design decision D1. [PR #11832](https://github.com/tursodatabase/turso/pull/11832) |
 | 14 | Six schema special cases (S2, S3, S6, S7, S10, S14) and the guards of `SIMPLIFY.md` step 5 are not needed. | `DESIGN-schema.md`, Findings 3, and `SIMPLIFY.md` step 5 | Unverified | TLC finds no error with the guard off. The docs say that this means "not shown needed at these bounds", not "safe to delete". The variants are `noCoversBegin`, `noCoversEnd`, `noAllocRetiresStale`, `noOpenFallback`, `noGenerationGate`, `noRootGcProtect`, `noSkipCycle` and `blockingNoPurge`. |
 | 15 | #11499, #11500, #11501 and #11502: the model "caught" four issues. | `DESIGN-schema.md`, Open issues | Reproduced known issue | Mikael Francoeur filed all four on Nov 5, a week before the spec PR. Variants `issue11499` (`CookieNotBehind`), `issue11500` (`ReadsCorrect`), `issue11501` and `issue11502` (`RecoveryCorrect`) fail. The replay in PR #11779 confirms the #11502 trace (row lost at step 8) and the #11499 trace (cookie behind at step 11) on the engine. #11500: read side only. #11499: the lost INSERT is a retry-loop bug that the model leaves out. [PR #11748](https://github.com/tursodatabase/turso/pull/11748) |
 | 16 | #8004, #7960 and #8077: the model "caught" three older issues. | `DESIGN-schema.md`, Open issues | Reproduced known issue | Older open issues. Variants `issue8004` (`PagesAccounted`), `issue7960` (`KindsMatch`), and `issue8077` with `issue8077Row` (`NoLiveDestroy`, `SchemaRowCurrent`) fail. For #7960, TLC found the mirror image of the reported direction. |
 | 17 | #8087 and #8537: the model reproduces two older issues. The docs also mention #8091 to #8094. | `DESIGN-schema.md`, Open issues | Reproduced known issue | `noFrozenMark` reproduces #8087. #8537 shows up only with its fix (S16) switched off (`issue8537`, `OpenCorrect`). #8091 to #8094 are already fixed in the code. #8091 and #8092 are not verified one by one. #8093 and #8094 cannot be expressed, because the model has no catalog reads and no GC of `sqlite_schema`. |
 | 18 | #7480 and #9749: the recovery spec reproduces two older issues. | PR #11832 | Reproduced known issue | `issue7480` and `issue9749` fail `OpenSucceeds`, and both fixed variants pass. The spec is `MvccRecovery.qnt` in PR #11832. It is not merged. [PR #11832](https://github.com/tursodatabase/turso/pull/11832) |
 | 19 | #11794: `rootpage_gc_protected` never changes a GC decision. | PR #11794 | Simplification evidence | This is the strongest case in the repo: a reachability check, a negative control, an inductive invariant at the main constants, spec-first runs and a Rust assertion over 200 seeds. Larger bounds (step 6 of "How to delete a guard") were not run. This is evidence for a deletion, not a bug. [PR #11794](https://github.com/tursodatabase/turso/pull/11794) |
+
+## Engine bug: read-only open after a passive checkpoint
+
+Title: MVCC: a read-only open fails after a passive checkpoint and a clean close.
+
+A database with `experimental_mvcc_passive_checkpoint` keeps WAL frames after
+a passive checkpoint, because a passive checkpoint does not restart the WAL
+and a clean close does not checkpoint. On the next open, startup treats any
+WAL frame as an interrupted checkpoint (`RECOVERY_SEMANTICS.md` case 1). A
+read-write open completes it. A read-only open cannot write, so it refuses
+(`core/mvcc/database/mod.rs:9264-9268` at ae2cb7388). So a read-only open
+fails for every passive database that ran a checkpoint since its last WAL
+restart. The case table of `RECOVERY_SEMANTICS.md` has no read-only row.
+
+- Expected: the read-only open succeeds and `SELECT id FROM t` returns 7,
+  as it does after a blocking checkpoint.
+- Actual: `Database::open_file_with_flags` returns
+  `Corrupt("Cannot reconcile interrupted MVCC checkpoint in read-only mode")`.
+- Scope: an automatic checkpoint (`PRAGMA mvcc_checkpoint_threshold = 1`)
+  gives the same failure. A read-only open with the flag off also fails. With
+  no checkpoint, the WAL is empty after close and the open succeeds. A
+  database without the flag cannot reach the state, because its checkpoints
+  restart the WAL and `PRAGMA wal_checkpoint(PASSIVE)` returns an error.
+- Result: fails 3 of 3 runs on turso main at ae2cb7388. The WAL holds 12392
+  bytes after the clean close.
+- Trace: `harness/mbt_tests/traces/MvccRecovery-leadA.itf.json`, 14 steps of
+  module `leadA` in `specs/MvccRecoveryConfigs.qnt`. One commit, one passive
+  checkpoint to its end, then a close. Invariant `OpenSucceeds`.
+
+The test goes in `tests/integration/mvcc/` of turso, with `mod probe;` in
+`tests/integration/mvcc/mod.rs`. Run it with `cargo test -p core_tester
+--test integration_tests read_only_open_after_passive_checkpoint`.
+
+```rust
+use super::checkpoint::get_rows;
+use std::sync::Arc;
+use turso_core::io::PlatformIO;
+use turso_core::{ConnectOpts, Database, DatabaseOpts, OpenFlags, SessionRole};
+use turso_sqlite::SqliteDialect;
+
+fn open(path: &str, flags: OpenFlags) -> turso_core::Result<Arc<Database>> {
+    Database::open_file_with_flags(
+        Arc::new(PlatformIO::new().unwrap()),
+        path,
+        flags,
+        DatabaseOpts::new().with_experimental_mvcc_passive_checkpoint(true),
+        None,
+        Arc::new(SqliteDialect),
+    )
+}
+
+#[test]
+fn read_only_open_after_passive_checkpoint_and_clean_close() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("ro_passive.db");
+    let path = path.to_str().unwrap();
+    {
+        let db = open(path, OpenFlags::default()).unwrap();
+        let conn = db.connect(ConnectOpts::new(SessionRole::Superuser)).unwrap();
+        conn.execute("PRAGMA journal_mode = 'mvcc'").unwrap();
+        conn.execute("CREATE TABLE t(id INTEGER PRIMARY KEY)").unwrap();
+        conn.execute("INSERT INTO t VALUES (7)").unwrap();
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
+        conn.close().unwrap();
+    }
+    let db = open(path, OpenFlags::default() | OpenFlags::ReadOnly)
+        .expect("read-only open of a cleanly closed passive database");
+    let conn = db.connect(ConnectOpts::new(SessionRole::Superuser)).unwrap();
+    let rows = get_rows(&conn, "SELECT id FROM t");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0].as_int().unwrap(), 7);
+}
+```
+
+## Exploration passes
+
+Each pass lists what ran and every divergence between the engine and the
+model. The engine is turso at the pin of `harness/Cargo.toml` unless a line
+says otherwise.
+
+- 2026-11-17, row spec, module `mbt`. 3300 fresh random traces of 60 to 80
+  steps (seeds 0x1001 and 0x5eed2026 onward) and 280 witness traces (7
+  predicates, 40 seeds each, about 50 steps). The witnesses are a read of a
+  key whose B-tree at the read mark is stale, the same after two frames, a
+  reader that begins after the publish on an older mark, a log truncate with
+  a logged writer in flight, a truncate with a Preparing writer, a crash
+  point in the middle of a checkpoint, and a backfill held by a reader. All
+  3580 traces replay with no divergence. Before the driver fix of 84ceff4,
+  44% of fresh traces were refused at the reader pin.
+- 2026-11-17, recovery spec, lead `leadA`. Reproduced on turso main as the
+  engine bug above.

@@ -31,6 +31,6 @@ mod tests {
             );
             traces += 1;
         }
-        assert_eq!(traces, 10);
+        assert_eq!(traces, 11);
     }
 }
