@@ -3,3 +3,4 @@ specs/explore-gen/
 specs/traces/
 specs/states/
 harness/target/
+scripts/__pycache__/
