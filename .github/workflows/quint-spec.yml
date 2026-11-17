@@ -1,13 +1,6 @@
-# Status: prepared, not run on GitHub yet. I timed these exact commands on a
-# local machine (see PR description): about 3 minutes, with Quint 0.33.1 and
-# Temurin 21. I could not run this file on a GitHub runner, so the runner label,
-# the Apalache download and the Quint install are untested here. Look at the
-# first run of this job before you require it.
-#
-# This job checks the Quint specs only. It does not check that the Rust code
-# in core/mvcc follows the specs. The main configurations take 3.5 to 17
-# minutes, so they are not in this job. Run them by hand with `make check` in
-# quint/mvcc-passive-checkpoint.
+# This job checks the Quint specs only. It does not check that the turso code
+# follows the specs. The main configurations take 3.5 to 17 minutes, so they
+# are not in this job. Run them by hand with `make check` in specs/.
 name: Quint Spec
 
 on:
@@ -15,13 +8,11 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "quint/**"
-      - "core/mvcc/**"
+      - "specs/**"
       - ".github/workflows/quint-spec.yml"
   pull_request:
     paths:
-      - "quint/**"
-      - "core/mvcc/**"
+      - "specs/**"
       - ".github/workflows/quint-spec.yml"
 
 concurrency:
@@ -31,11 +22,11 @@ concurrency:
 jobs:
   quint-spec:
     name: Typecheck and run small variants
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: quint/mvcc-passive-checkpoint
+        working-directory: specs
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v5
