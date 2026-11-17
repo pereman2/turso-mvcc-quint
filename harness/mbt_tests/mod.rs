@@ -75,6 +75,12 @@ enum Failure {
     CommittedNotDurable,
     /// A process crash now replays a rolled-back transaction.
     RolledBackReplayed,
+    /// A scan of sqlite_schema returned other tables than the spec oracle.
+    CatalogRead,
+    /// GC kept a version that the spec dropped.
+    GcKept,
+    /// GC dropped a version that the spec kept.
+    GcDropped,
 }
 
 /// Why a replay stopped before the end of the trace.
