@@ -94,8 +94,6 @@ open reader, checkpoint passes that stop before they complete, and mode T.
 - WAL restart and TRUNCATE, and `backfill_floor` across them.
 - `cleanup_dropped_commit` on the non-group path. `MvccGroupCommit.qnt`
   models it on the group path.
-- Reads of `sqlite_schema` through the dual cursor, and the GC of
-  `sqlite_schema`.
 - The statement retry loop.
 - A checkpoint on its own connection, and checkpoints that stop partway, in
   the schema spec. The first specs left both out and missed #11831 and

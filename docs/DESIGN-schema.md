@@ -304,7 +304,9 @@ mean that the case is safe to delete. The variant files are modules in
 | S18. Indexes are keyed by the binding that owns their root at `snapshot_ts`. | `BuildLocalSchemaView` | Not switched off. The model gives an index the same binding, create and destroy steps as a table, and keys its rows by its own object. | none |
 | S19. `resolve_dropped_binding` picks the binding that covers the drop timestamp. | `resolve_dropped_binding` | Modeled, not switched off. Not verified. | none |
 | S20. An ended `sqlite_schema` version followed by a version with the same `rootpage` is not a `DROP`. | `is_schema_metadata_only_rewrite` (line 617) | Modeled with `Alters`, not switched off. It compares raw `rootpage` values, so a temporary id and the page of the same table count as two B-trees (#8077). | none |
-| S21. Every statement of a transaction reads pages at the WAL mark of its begin. | `Transaction::read_mark`, the pager read lock | Needed. `ReadsCorrect` fails: a reader begins, an insert commits, a checkpoint writes the row, and the reader's next statement reads the row from the new frame. This is the symptom of #8087. | `noFrozenMark` |
+| S21. Every statement of a transaction reads pages at the WAL mark of its begin. | `Transaction::read_mark`, the pager read lock | Needed. `ReadsCorrect` fails: a reader begins, an insert commits, a checkpoint writes the row, and the reader's next statement reads the row from the new frame. This is the symptom of #8087. With catalog reads, the same switch gives the symptoms of #8093 and #8094. | `noFrozenMark`, `issue8093`, `issue8094` |
+| S22. GC drops a `sqlite_schema` version only when its stamp is at or below the floor. | `gc_version_chain` (`materialized_for_readers`) | Needed. `CatalogReadsCorrect` fails: a `DROP` commits, a reader begins with a mark below the frame that destroys the table, and GC drops the chain at the end of that pass. The reader's B-tree still has the table. | `noCatalogGcFloorOnly`, `noCatalogGcFloor` |
+| S23. Rule 2 needs `e <= lwm`, and Rule 3 needs no open transaction. | `gc_version_chain` | Not shown needed. The model scans in one atomic step, so it cannot show the race that the code comment names (mod.rs:8623-8628). | `noCatalogGcLwm` |
 
 Reachability checks fail as they must. Another table reuses a freed page
 (`reachReuse`). A reader reads the old owner of a reused page through an old
@@ -373,8 +375,8 @@ reproduced.
   2 (-100). The roots differ, so it destroys page 2 and creates a new empty
   B-tree. The row of `t1` is gone. A run of the Rust test from the issue at
   24c03ed9a still fails with the same symptom.
-- #8087, #8091, #8092, #8093 and #8094 are fixed at 24c03ed9a. The Rust test
-  of each issue passes there (five runs each). The fixing commits are not
+- The Rust tests of #8087, #8091, #8092, #8093 and #8094 pass at 24c03ed9a
+  (five runs each). #8093 and #8094 are still open on GitHub. The fixing commits are not
   identified. In the model, the read mark that a transaction pins at its
   begin protects the reader of #8087. `noFrozenMark` switches
   that off, and TLC reproduces the trace of #8087. A reader begins at 2. An
@@ -384,9 +386,10 @@ reproduced.
   through a newer frame. TLC reports only the first trace, so these two
   are not verified one by one. `reachOldOwner` shows that a reader with a frozen mark
   reads the old owner of a reused page. #8093 and #8094 read `sqlite_schema`
-  rows. The model does not read the catalog through the dual cursor, and it
-  does not collect garbage of `sqlite_schema` versions, so it cannot express
-  them.
+  rows. The section "Catalog reads and catalog GC" below models them:
+  `issue8093` and `issue8094` show their symptoms with `GuardFrozenMark`
+  off. The fixing commits are still not identified, so the model does not
+  show the cause.
 
 ## Findings
 
@@ -432,8 +435,115 @@ lead. `FINDINGS.md` gives the verdict for each one.
    Rust.
 7. #8087, #8091, #8092, #8093 and #8094 pass at 24c03ed9a. In the model the
    frozen read mark of the transaction (S21) protects the reader of #8087.
-   The model does not check #8091 and #8092 one by one, and it cannot express
-   #8093 and #8094.
+   The model does not check #8091 and #8092 one by one. With
+   `GuardFrozenMark` off, `issue8093` and `issue8094` show the symptoms of
+   #8093 and #8094 (section "Catalog reads and catalog GC").
+
+## Catalog reads and catalog GC
+
+The feature constant `CatalogReads` adds catalog scans and catalog GC. Off,
+the model has the same states as before. The configuration `catalog` is the
+design with catalog reads. `make variants` runs it, not `make check`.
+
+A reader with an open transaction can run a new statement that scans
+`sqlite_schema` (`ReaderReadCatalog`). The scan goes through the dual cursor.
+For each row it returns the version that is visible at `begin_ts`, and the
+B-tree row from page 1 unless the chain hides it. A version hides the B-tree
+row when it is visible, or when it ended before `begin_ts`
+(`is_btree_invalidating_version`, mod.rs:11065-11121). A version that begins
+after `begin_ts` does not hide it. In passive mode the chain always decides,
+because `btree_covers_chain_for_snapshot` returns false (mod.rs:6076-6078).
+Page 1 is always readable: table id -1 has a live binding with
+`materialized_at = ORIGIN`. The B-tree side reads page 1 at the WAL mark of
+the statement. With `GuardFrozenMark` this is the mark of the begin.
+
+The variable `scat[o]` holds the chain of the `sqlite_schema` row of `o`.
+`gone` says that GC dropped it. `mat` is the `materialized_at` stamp of its
+newest state. `tomb` says that a `DROP` or `ALTER` ran after GC dropped the
+chain. The code then inserts a tombstone (a version with no begin) for the
+B-tree row (mod.rs:5759-5809). So the old state comes from the B-tree.
+
+- `DdlExec` writes a version with a TxID, and the stamp goes back to none
+  (`set_end`, mod.rs:10989-11002). `DdlPrepare` resets it again for the
+  commit.
+- `CheckpointFinish` stamps each row whose newest committed event is in the
+  window of the pass, with the frame of the pass (`StampCatalog`). A row
+  with an open DDL is not stamped. Then it runs the GC rules on every row,
+  as `GcTableRows` and the passive `Finalize` sweep do. Their floor counts
+  the readers that pinned a pager mark and the new `backfill_floor`
+  (`gc_floor_reader_mark`, checkpoint_state_machine.rs:2237-2250).
+- `GcCatalog(o)` is one pass of `gc_incremental`. Its floor counts the
+  registered readers, `backfill_floor`, and the read mark of an open DDL
+  transaction (`compute_min_reader_mark`).
+- Both use the same rules (`CatGcOk`). The stamp must be at or below the
+  floor (`GuardCatalogGcFloor`). A dropped row also needs `d <= lwm`
+  (Rule 2). A live row needs no open reader and no open DDL transaction
+  (Rule 3), because an open transaction holds `lwm` below `MAX`
+  (mod.rs:7995-8007). An open DDL never holds Rule 2 back: it began after
+  every committed drop.
+- An open DDL transaction holds the WAL mark of its begin, and the passive
+  backfill stops at it (`ddl.mark`). So `backfill_floor` stays below a frame
+  that the DDL cannot see. The row spec has the same rule as
+  `WritersPinMarks`. The trace replay showed the need: without the rule, the
+  spec dropped a catalog chain that the engine kept, because the engine
+  floor stayed at frame 0. Only the catalog configurations have this rule,
+  so the other configurations keep their state counts. They allow a higher
+  `backfillFloor` than the engine.
+
+Two invariants check the scan.
+
+- `CatalogReadsCorrect`: a scan returns one row for each object that exists
+  at `begin_ts`, and no other row (#8093).
+- `CatalogNoTwoGenerations`: a scan never returns a dropped object together
+  with an object created at or after the drop (#8094).
+
+TLC ran each configuration with 4 workers. The counts are distinct states.
+The variants that must fail and the reachability checks use `MaxTs = 3` or
+4, a bound that reaches their state. `catalog` uses 4. A check that fails stops at
+the first violation that a TLC worker finds, so its count changes a little
+from run to run.
+
+| Configuration | Expect | Result |
+|---|---|---|
+| `catalog` | No error | No error, 35,436,959 distinct states (`MaxTs = 4`) |
+| `issue8093` | `CatalogReadsCorrect` fails | Fails, 32,638 distinct states |
+| `issue8094` | `CatalogNoTwoGenerations` fails | Fails, 298,668 distinct states |
+| `noCatalogGcFloor` | `CatalogReadsCorrect` fails | Fails, 60,041 distinct states |
+| `noCatalogGcFloorOnly` | `CatalogReadsCorrect` fails | Fails, 18,661,949 distinct states (`MaxTs = 4`) |
+| `noCatalogGcLwm` | No error | No error, 32,201,711 distinct states (`MaxTs = 4`) |
+| `reachCatalogNewer` | `NeverCatalogNewer` fails | Fails, 29,682 distinct states |
+| `reachCatalogGenerations` | `NeverCatalogGenerations` fails | Fails, 345,088 distinct states |
+| `reachCatalogFromBtree` | `NeverCatalogFromBtree` fails | Fails, 69,232 distinct states |
+| `reachCatalogGcDropped` | `NeverCatalogGcDropped` fails | Fails, 55,749 distinct states |
+| `reachCatalogTomb` | `NeverCatalogTomb` fails | Fails, 20,363 distinct states |
+
+`issue8093` and `issue8094` switch `GuardFrozenMark` off. A new statement
+then reads page 1 at the newest frame. In `issue8093` a table that was
+created after the reader's begin is in that frame, and its version begins
+after `begin_ts`, so it does not hide the B-tree row. In `issue8094` the
+frame has the new table and not the dropped one. The scan returns the old
+table from the version store and the new one from the B-tree. The code at
+the pinned rev keeps the mark of the begin for every statement (mod.rs:6757,
+core/vdbe/execute.rs:4335-4337). The reach traces of both shapes conform on
+the engine at 0c9fe0dd9, with readers that begin with `BEGIN CONCURRENT` as
+in the issues. The engine was not run with one table name used twice. Both
+issues are still open on GitHub.
+
+`noCatalogGcFloorOnly` switches off only the floor check. At `MaxTs = 4`,
+`CatalogReadsCorrect` fails. A `DROP` commits. The commit does not bump
+`schema_generation`. Only the publish of the checkpoint that destroys the
+table does, and the reader compiles before that publish. The reader begins
+after the `DROP`, with a mark below the frame that destroys the table. GC at the end of that pass drops the chain, and the
+reader's B-tree still has the table. At `MaxTs = 3` TLC found no error
+(4,685,845 distinct states), because the trace needs four timestamps. A
+round of review found this. `noCatalogGcFloor` also switches off the
+generation gate (S10), which gives a shorter trace at `MaxTs = 3`.
+
+`noCatalogGcLwm` finds no error only because the model scans
+`sqlite_schema` in one atomic step. The code needs `lwm == MAX` for Rule 3
+because a dual-cursor scan can lose a row when the chain empties during the
+scan (mod.rs:8623-8628). So this result is not evidence that the guard can
+go.
 
 ## Not modeled
 
@@ -445,8 +555,21 @@ lead. `FINDINGS.md` gives the verdict for each one.
   protocol.
 - More than one `ALTER` per table, `ALTER` of an index row (rename), and
   the new column in the row data.
-- Reads of `sqlite_schema` through the dual cursor, and garbage collection
-  of `sqlite_schema` versions (#8093, #8094).
+- Catalog reads together with `ALTER`. The catalog configurations keep
+  `Alters` off, so the `ALTER` parts of `tomb` and `CatShadows` are not
+  checked.
+- Catalog GC per version. `GcCatalog` drops the whole chain of a
+  `sqlite_schema` row. Rule 2 can drop the old version of an altered row and
+  keep the new one. The model leaves out only those states.
+- A `DROP` and a `CREATE` of one name in one transaction (#8094). The model
+  needs two DDL commits, so the new table always has a later timestamp.
+- A catalog scan that runs while GC changes the chain. The model scans
+  `sqlite_schema` in one atomic step (see `noCatalogGcLwm`).
+- The write set of the checkpoint for `sqlite_schema` rows. `StampCatalog`
+  stamps every row whose newest event is in the window. The code stamps the
+  rows that it wrote and the rows in `unwritten_table_rows`. The model does
+  not have that rule. The `reachCatalogGcDropped` trace has a `CREATE` and a
+  `DROP` in one window, and the engine chain matches the spec there.
 - Writes through a stale root page. The model checks the read side of #11500.
 - The retry loop of `Statement` (the second bug of #11499).
 - Readers that see the publish window half applied. The model applies the

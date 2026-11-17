@@ -145,6 +145,49 @@ The schema driver runs the whole collection at the last `CheckpointObj` of a
 pass. A commit between two `CheckpointObj` steps is above the snapshot, so it
 changes nothing that the pass collects.
 
+## Catalog traces
+
+The test `catalog_traces_conform` replays one trace of each catalog
+reachability check (`DESIGN-schema.md`, "Catalog reads and catalog GC")
+with `Expect::Conforms`.
+
+| Trace | What the engine does |
+|---|---|
+| `reachCatalogNewer` | A reader scans `sqlite_schema` while the newest frame has a table created after its begin (#8093). The scan does not return it |
+| `reachCatalogGenerations` | A reader scans while the newest frame has a new table and not the dropped one that the reader sees (#8094). The scan returns only the old table |
+| `reachCatalogFromBtree` | GC drops the `sqlite_schema` version of a table, and the reader's scan finds the table in the B-tree |
+| `reachCatalogGcDropped` | GC drops the `sqlite_schema` chain of a dropped table (Rule 2) |
+| `reachCatalogTomb` | A `DROP` runs on a table whose `sqlite_schema` chain GC dropped, and the engine inserts a tombstone. No scan follows, so the read path of a tombstone is checked only by TLC |
+
+`ReaderReadCatalog` runs `SELECT name FROM sqlite_schema WHERE type =
+'table'` in the reader transaction. It compares the count of each spec table
+with the spec oracle (`CatalogRead`). `GcCatalog` runs `gc_chain_now` on the
+`sqlite_schema` row of the table with the floors of `gc_incremental`. `Gc`
+does the same on the row of the table, and refuses the trace when
+`rootpage_gc_protected` holds. After every step, the driver checks that the
+chain of each `sqlite_schema` row is empty exactly when the spec says that
+GC dropped it (`GcKept`, `GcDropped`). This also covers the GC that the
+engine runs at the end of a checkpoint pass. A spec reader that pinned a
+mark below the newest frame and did not begin has no engine reader, so the
+driver refuses a trace where this changes GC. The engine backfills every
+frame it can, so the driver also refuses a trace where the spec backfill
+stopped before the last frame and the GC results differ. Only
+`reachCatalogTomb` runs a `GcCatalog` step, and it drops a live row
+(Rule 3). Rule 2 on a dropped row runs only in the GC at the end of a
+checkpoint pass (`reachCatalogGcDropped`). A `ReaderBegin` that the spec
+refuses (Busy or SchemaUpdated) runs nothing.
+
+A design trace can also hit #11499, which the engine at the pinned rev still
+has: a DDL commits between the pager commit and the publish of a checkpoint,
+and the publish puts the header cookie behind (`CookieBehind`). The first
+`reachCatalogGcDropped` trace did this. The committed one comes from
+`quint run --seed 11`. To check a folder of new schema traces:
+
+```bash
+MBT_TRACES=$PWD/specs/traces/bugs harness/run-in-turso.sh -- \
+  mbt_tests::schema::schema_traces_from_folder -- --ignored --nocapture
+```
+
 ## Bug traces
 
 | Variant | Trace | Engine result |
@@ -167,10 +210,14 @@ instead of `CookieNotBehind`.
 
 ## Limits
 
-- The schema driver supports DDL CREATE and DROP, row writes and the
-  checkpoint. It does not map readers, ALTER and GC yet. So it does not
-  replay the main configuration of the schema spec, or the bug traces that
-  need readers (`issue11501`, `issue11500`).
+- The schema driver supports DDL CREATE and DROP, row writes, the
+  checkpoint, catalog scans, catalog GC and row GC. A reader begins with
+  `BEGIN CONCURRENT` and checks only its scans of `sqlite_schema`. Its table
+  reads (`ReaderOpen`, `ReaderRead`) run nothing. ALTER is not mapped. The
+  driver runs an inner `ReaderBegin` as a normal begin, which is right only
+  with `FixInnerTxChecks` on.
+  So it does not replay the main configuration of the schema spec, or the bug
+  traces that need table reads (`issue11501`, `issue11500`).
 - The sequence spec has no driver yet (`setvalRace`).
 - The engine picks page numbers and table ids itself. The schema driver
   compares what recovery sees, not the numbers.
