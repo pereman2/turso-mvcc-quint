@@ -12,6 +12,7 @@ result.
 | `MvccPassiveSequence.qnt` | `MvccPassiveSequenceConfigs.qnt` | `DESIGN-sequences.md` |
 | `MvccPassiveSchema.qnt` | `MvccPassiveSchemaConfigs.qnt` | `DESIGN-schema.md` |
 | `MvccRecovery.qnt` | `MvccRecoveryConfigs.qnt` | `DESIGN-recovery.md` |
+| `MvccGroupCommit.qnt` | `MvccGroupCommitConfigs.qnt` | `DESIGN-group-commit.md` |
 
 A configurations file has one module for each configuration. The module sets
 the constants of the spec. The module named `main` is the main configuration
@@ -33,7 +34,7 @@ These results are evidence within these bounds and this model, not proof.
 
 ### What is modeled
 
-There are four specs in this folder.
+There are five specs in this folder.
 
 - Rows (`MvccPassiveCheckpoint.qnt`): version chains, the logical log, WAL
   frames, the database file, writers, the checkpoint and GC. The main
@@ -56,6 +57,11 @@ There are four specs in this folder.
 - Recovery (`MvccRecovery.qnt`): the checkpoint file steps, crash recovery
   and open, with the row GC rules of modes B and P. It has no readers, schema
   or indexes. `DESIGN-recovery.md` gives its configurations and results.
+- Group commit (`MvccGroupCommit.qnt`): the commit queue, the leader batch,
+  the retry path, the log fsync and dropped COMMIT statements. The main
+  configuration has 3 transactions (2 FULL, 1 NORMAL) and 4 tickets. TLC
+  explores 157,611 states in about 10 seconds on a Mac. It has no readers and no
+  checkpoint. `DESIGN-group-commit.md` gives its configurations and results.
 
 The row and sequence specs also model a checkpoint on the connection of an
 open reader, checkpoint passes that stop before they complete, and mode T.
@@ -73,11 +79,13 @@ open reader, checkpoint passes that stop before they complete, and mode T.
   cursor and `rootpage_gc_protected` for indexes.
 - Write-write validation against a GC that drops versions.
 - `finalized_tx_states` pruning.
-- Group commit durability and the order of fsync and `CommitEnd`. The log
-  append of the model is one atomic step.
+- Group commit in the row, schema and sequence specs, where the log append
+  is one atomic step. `MvccGroupCommit.qnt` models it alone, with no
+  checkpoint and no readers.
 - Real cursor scans. The model reads one key in one step.
 - WAL restart and TRUNCATE, and `backfill_floor` across them.
-- `cleanup_dropped_commit`.
+- `cleanup_dropped_commit` on the non-group path. `MvccGroupCommit.qnt`
+  models it on the group path.
 - Reads of `sqlite_schema` through the dual cursor, and the GC of
   `sqlite_schema`.
 - The statement retry loop.
