@@ -283,8 +283,8 @@ Suggested spec work that follows from this:
 ## 5. Checkpoint stops, owners, and mode T
 
 The added model paths use Rust source at base `3a95ac963`.
-The supplied probe report is
-`/home/peristocles/scratch-modelgaps/probes/RESULTS.md`.
+The supplied probe report is a local file, `probes/RESULTS.md`. It is not in
+this repo.
 Probe 4 reports stranded versions at line 87 of that file.
 Probe 5 reports leaked root pages at line 126 of that file.
 No Rust probe was repeated for these model changes.
@@ -358,7 +358,7 @@ failure at `published` (`MvccPassiveSequence.qnt:814`).
 (`MvccPassiveSequence.qnt:815`).
 A model read failure in mode T is a lead. A Rust reproduction is not verified.
 The supplied sequence probe did not reproduce a wrong read
-(`/home/peristocles/scratch-modelgaps/probes/RESULTS.md:55`).
+(`probes/RESULTS.md:55`).
 
 `CheckpointOwnerReaders` enables outer snapshots in the sequence spec.
 `TxCommit` picks `ckNow`. A successful inner commit can then start a checkpoint
@@ -383,8 +383,7 @@ It does not verify the unlocked schema publish race.
 
 ### The Rust fix uses early stamps and cleanup publication
 
-The read-only fix worktree is
-`/home/peristocles/.t3/worktrees/turso/t3-7761a9a5-3a389ac9d7146b01`.
+The Rust fix is in a local worktree that is not published.
 Its checked head is `633aeb51a`. The following source references use that head.
 The diff against `origin/main` adds two rules.
 The pager commit calls `stamp_committed_versions` before the publish yield
@@ -451,8 +450,8 @@ The simulator did not capture `reachEarlyStampGcAfterFailure` in 200,000
 walks of 40 steps. TLC reached it after 144,369 states.
 An ITF trace for that witness is not verified.
 
-The saved ITF traces are in `traces/bugs/` in this worktree.
-A second copy is in `/home/peristocles/scratch-modelgaps/stops-model-traces/`.
+The saved ITF traces were in `traces/bugs/` of the author's worktree. They
+are not in this repo. `make bug-traces` writes them again.
 `MvccPassiveCheckpoint-rustFixOwner.itf.json`,
 `MvccPassiveSequence-rustFixOwner.itf.json`, and
 `MvccPassiveSequence-rustFixTruncate.itf.json` contain the wrong reads.
@@ -551,9 +550,9 @@ Every command uses `WORKERS=8`. Shards execute one after another in this folder.
 The commands set the following values on the make command line:
 
 ```sh
-QUINT=/home/peristocles/.local/share/quint/node_modules/.bin/quint
-JAVA_HOME=/home/peristocles/.local/share/mise/installs/java/temurin-21
-JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/home/peristocles/scratch-modelgaps/tlc-tmp-u4
+QUINT=<path to quint 0.33.1>
+JAVA_HOME=<path to Temurin 21>
+JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=<a scratch directory>
 ```
 
 The command-line value for `JAVA_TOOL_OPTIONS` overrides the Makefile default.
@@ -619,15 +618,14 @@ Its result is not verified.
 The unchanged schema `alter` and `indexes` variants remain not verified from round 1.
 The full set of 109 configurations is therefore not verified.
 
-The review log is `/home/peristocles/scratch-modelgaps/round2-checks.log`.
-The full review result table is `/home/peristocles/scratch-modelgaps/round2-results.md`.
-The type-check log is `/home/peristocles/scratch-modelgaps/round2-typecheck.log`.
+The review log, the full result table and the type-check log are local files
+of the author. They are not in this repo.
 The sequence mode-T checks repeat after the final purge-predicate restriction.
 Both `truncateFlagOn` and `rustFixTruncate` still fail as their comments require.
 The purge bug therefore remains reachable in the corrected model.
 A Rust reproduction remains not verified.
 
-The trace guide is `/home/peristocles/scratch-modelgaps/stops-model-traces/README.md`.
+The trace guide is a local file of the author. It is not in this repo.
 It records the new nonempty owner commit and the corrected sequence purge trace.
 The archived guide and traces retain the round 1 evidence.
 The simulator found traces for both leak failures and their repair witnesses in round 1.

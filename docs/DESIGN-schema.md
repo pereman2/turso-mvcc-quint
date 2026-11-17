@@ -504,8 +504,8 @@ frame and a failure at `committed` (`MvccPassiveSchema.qnt:1229`).
 
 ## Publish from cleanup in the Rust fix
 
-This section uses the read-only Rust fix at `633aeb51a` in
-`/home/peristocles/.t3/worktrees/turso/t3-7761a9a5-3a389ac9d7146b01`.
+This section uses the read-only Rust fix at `633aeb51a`, in a local worktree
+that is not published.
 `FixStampAtPagerCommit` stamps written row chains in `CheckpointCommit`
 (`MvccPassiveSchema.qnt:796`). The Rust call is at
 `core/mvcc/database/checkpoint_state_machine.rs:3301`.

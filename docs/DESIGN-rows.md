@@ -317,8 +317,7 @@ This control prevents the race. It is not a repair after a failure.
 
 ## Stamp and publish rules from the Rust fix
 
-The read-only fix worktree is
-`/home/peristocles/.t3/worktrees/turso/t3-7761a9a5-3a389ac9d7146b01`.
+The Rust fix is in a local worktree that is not published.
 Its checked head is `633aeb51a`. Source references in this section use that head.
 The earlier sections use the requested base, `3a95ac963`.
 

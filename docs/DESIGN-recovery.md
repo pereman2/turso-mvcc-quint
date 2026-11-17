@@ -202,9 +202,9 @@ check. A witness requires the full dangerous state, not only an action:
 
 ## Rust results
 
-The tests are in `/home/peristocles/scratch-modelgaps/rust/`, with commands and
-output in `RESULTS.md` there. They are not committed, because they fail on
-current code.
+The tests are in local scratch files of the author, with commands and output
+in a `RESULTS.md` file. They are not committed, because they fail on current
+code.
 
 - `leadA`: a read-only open after a clean close fails with "Cannot reconcile
   interrupted MVCC checkpoint in read-only mode".
