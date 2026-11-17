@@ -11,7 +11,7 @@ This file lists each claim that the docs in this folder make about a bug or a si
 
 A claim that has no Rust test stays a lead. Every result is evidence within the bounds of the model, not proof.
 
-Counts: 6 held up, 6 found by Rust or code reading, 2 refuted, 4 unverified, 11 reproduced known issues (in 4 rows), and 1 simplification evidence.
+Counts: 6 held up, 6 found by Rust or code reading, 2 refuted, 5 unverified, 11 reproduced known issues (in 4 rows), and 1 simplification evidence.
 
 The state counts below come from the docs in this folder. `make bug-traces ONLY=<variant>` writes the trace of a variant to `traces/bugs/<Spec>-<variant>.itf.json`. The trace files are not in git.
 
@@ -40,6 +40,7 @@ The state counts below come from the docs in this folder. `make bug-traces ONLY=
 | 21 | A COMMIT that drops after its record is written becomes `Committed` before any fsync, so readers see a commit that a power loss loses. | `DESIGN-group-commit.md`, Invariants | Held up | Variant `dropCommitsUnsynced` breaks `CommittedDurable` (402 states). The replay of `group-committed-not-durable.itf.json` fails at step 7 with `CommittedNotDurable`. The Rust test `dropped_full_commit_seen_by_reader_survives_power_loss` in `harness/repro/group-commit-rows-21-22.patch` drops a FULL COMMIT at `LogRecordMarkedWritten`. A new reader then sees `[1]`, and the files as a power loss leaves them recover `[]`. It fails 3 of 3 runs on turso main at ae2cb7388. The test changes no engine code. No COMMIT returned success, so this is a read of data that a power loss loses, not a lost acknowledged commit. |
 | 22 | Two thread races also roll back a transaction whose frame is in the log: a drop between the owner check and `log_tx`, and a drop between the read of `log_appended` and `abandon_if_issued`. | `DESIGN-group-commit.md`, Invariants | Held up | `dropResurrects` and the reachability checks `NeverWriteRolledBack` and `NeverRollbackWritten` reach these states in the model. Neither window has a yield point in the engine, so no test on unmodified turso can stop there. `harness/repro/group-commit-rows-21-22.patch` adds a test-only hook (`race_hooks`, `#[cfg(test)]`) at each window, which runs the other connection's code there. With it, `waiter_dropped_between_owner_check_and_log_tx_stays_rolled_back` and `waiter_dropped_while_leader_marks_its_record_stays_rolled_back` show rows `[1]` before a restart and `[1, 2]` after it, 3 of 3 runs each on turso main at ae2cb7388. In both cases the frame of the rolled-back waiter is past the log offset, so a later commit does not overwrite it. On real threads the windows are a few instructions wide. |
 | 23 | A dropped COMMIT does not wait for its own `log_tx` write. If that write lands after the next leader wrote at the same offset, it overwrites an acknowledged frame. | `DESIGN-group-commit.md`, Not modeled | Refuted | `Statement::drop` calls `reset_best_effort`, and `reset_internal` waits for every in-flight completion except a park before the commit cleanup runs (`core/statement.rs:1518-1529` at ae2cb7388). A test IO that held the log write of the dropped COMMIT made the drop block in `IOCompletions::wait` (a stack sample on turso main at ae2cb7388), so the rollback and the lock release come after the write lands. Another path that discards an in-flight write without the statement reset was not searched. |
+| 24 | Mode B: a checkpoint that fails with `Busy` after its publish lets Rule 2 B drop a delete, and a pinned reader then reads the deleted row. | `DESIGN-rows.md`, section "Mode B". `MODEL-GAPS.md`, gap 2 and gap 24 | Unverified | Shown on main by a Rust probe with a direct pager pin (`pager.begin_read_tx()`). A trigger through a public API is not shown. Variant `blockingPagerPin` fails `ReadsCorrect`. The probe fails in 3 of 3 runs. See [the section below](#engine-bug-lead-a-failed-b-pass-and-a-pager-pin). |
 
 ## Engine bug: read-only open after a passive checkpoint
 
@@ -114,6 +115,142 @@ fn read_only_open_after_passive_checkpoint_and_clean_close() {
 }
 ```
 
+## Engine bug lead: a failed B pass and a pager pin
+
+Title: MVCC mode B: GC drops a delete after a checkpoint failed with `Busy`, and a pinned reader reads the deleted row.
+
+Shown on turso main 2827d0cc1 by a Rust probe with a direct pager pin. A trigger through a
+public API is not shown. Found by code reading and a Rust probe. The probe
+fails in 3 of 3 runs (a fourth run at the time of this work failed too). The
+variant `blockingPagerPin` shows the same shape (`ReadsCorrect` fails).
+
+Why it happens (turso main 2827d0cc1):
+
+1. The B checkpoint stores `durable_txid_max` in the publish window of
+   `CommitPagerTxn` (ck.rs:3238-3243, store at ck.rs:2108-2110).
+2. `CheckpointWal` then runs a TRUNCATE WAL checkpoint. It needs read mark 0
+   exclusive (wal.rs:1161-1172) and read marks 1 to 4 for the restart
+   (wal.rs:1239-1248). A reader holds one mark, so the call returns `Busy`.
+   Only a passive checkpoint swallows that `Busy` (ck.rs:3306-3310).
+3. Rule 2, B form, keeps a superseded version only when
+   `*e > ckpt_max && (in_btree || !has_current)` (mod.rs:8657-8661). It has no
+   stamp test. So `gc_incremental` drops the delete, because `e <= ckpt_max`.
+4. The next `SELECT` of the pinned connection adopts the read mark that the
+   connection holds (exec.rs:4350). The chain is empty, so it reads the B-tree
+   at the old mark, which still has the row.
+
+The probe opens the window with `pager.begin_read_tx()`, the same call as
+`maybe_reparse_schema` (core/connection.rs:1413). The raw WAL API has no public
+path: `wal_insert_begin` also takes the WAL write lock, so the checkpoint fails
+before its publish. A real failure needs a second thread to run the failing
+checkpoint and a third to run the GC inside the reparse window. A test of that
+trigger is not written. The likely symptom is a stale `sqlite_schema` row. This
+is not verified.
+
+The probe test (append to `core/mvcc/database/tests.rs` on 2827d0cc1, run with
+`cargo test -p turso_core --lib probe_mode_b -- --nocapture --test-threads=1`):
+
+```rust
+/// Gap 2, question 1: a pager read mark taken without the blocking gate (what
+/// force_reparse_schema and maybe_reparse_schema do before reparse_schema
+/// begins its MVCC tx). The B checkpoint gets Busy at CheckpointWal after its
+/// publish. Rule 2 B form then drops the delete version (e <= ckpt_max, no
+/// materialized_at test), and the reader adopts its old mark.
+#[test]
+fn probe_mode_b_pager_pin_after_failed_publish() {
+    let db = MvccTestDbNoConn::new_with_random_db();
+    let w = db.connect();
+    let mv = db.get_mvcc_store();
+    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
+    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
+    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    println!("after ckpt 1: {:?}", mv.debug_gc_snapshot());
+
+    let r = db.connect();
+    let rp = r.pager.load().clone();
+    rp.begin_read_tx().unwrap(); // pager pin, no gate, no MVCC tx
+    println!("reader pinned at {:?}", rp.wal_pos());
+
+    w.execute("DELETE FROM t WHERE k = 1").unwrap();
+    let ck = w.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+    let snap = mv.debug_gc_snapshot();
+    println!("ckpt 2 result: {ck:?}");
+    println!("after ckpt 2: durable = {}, rows_versions = {}", snap.durable_txid_max, snap.rows_versions);
+
+    let dropped = mv.gc_incremental(1000);
+    println!("gc_incremental dropped {dropped}, rows_versions = {}", mv.debug_gc_snapshot().rows_versions);
+
+    let rows = get_rows(&r, "SELECT k, v FROM t");
+    println!("reader rows: {rows:?}");
+    rp.end_read_tx();
+    assert!(rows.is_empty(), "reader saw a row that was deleted before it began: {rows:?}");
+}
+
+/// Control for the probe above: the same steps without the GC. The tombstone
+/// in the chain shadows the B-tree row, so the read is right.
+#[test]
+fn probe_mode_b_pager_pin_after_failed_publish_no_gc() {
+    let db = MvccTestDbNoConn::new_with_random_db();
+    let w = db.connect();
+    let mv = db.get_mvcc_store();
+    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
+    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
+    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let r = db.connect();
+    let rp = r.pager.load().clone();
+    rp.begin_read_tx().unwrap();
+    w.execute("DELETE FROM t WHERE k = 1").unwrap();
+    let ck = w.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+    println!("ckpt 2 result: {ck:?}, rows_versions = {}", mv.debug_gc_snapshot().rows_versions);
+    let rows = get_rows(&r, "SELECT k, v FROM t");
+    println!("reader rows without GC: {rows:?}");
+    rp.end_read_tx();
+    assert!(rows.is_empty());
+}
+```
+
+Output of the failing test (Mac, 2026-11-17). The tests are in
+`harness/repro/mode-b-pager-pin.patch`:
+
+```text
+reader pinned at (3, 0)
+ckpt 2 result: Err(Busy)
+after ckpt 2: durable = 9, rows_versions = 1
+gc_incremental dropped 1, rows_versions = 0
+reader rows: [[Numeric(Integer(1)), Text(Text { value: "a", subtype: Text })]]
+panicked: reader saw a row that was deleted before it began
+```
+
+The control `probe_mode_b_pager_pin_after_failed_publish_no_gc` prints
+`ckpt 2 result: Err(Busy), rows_versions = 1` and `reader rows without GC: []`.
+So the GC step causes the wrong read.
+
+A first idea was to make Rule 2, B form, need a stamp (`FixB2NeedsStamp`). It was
+rejected. In mode B a version gets a stamp only inside a pass, so every version
+that `gc_incremental` sees has no stamp. The fix stops all Rule 2 B drops
+between passes. The model passed only because GC never ran.
+
+The fix that the model supports is `FixB2WaitsForPinned`: Rule 2, B form, drops
+nothing while a pinned read mark is below the WAL max frame. An engine form of
+the fix must count every pager reader, also a reader on read slot 0.
+`min_pinned_read_frame()` reads only slots 1 to 4 (wal.rs:916-927 on main
+2827d0cc1). A reader that pins on a fully backfilled WAL takes slot 0
+(wal.rs:1059-1065), and the reader of the probe is that case. So a fix that
+uses only that function still drops the delete. This is by code reading.
+`blockingPagerPinFixed`
+finds `ReadsCorrect`, `RecoveryCorrect`, `TypeOK` and `BackfillBelowReaders`
+true (2,009,967 states, 100 seconds). GC still drops versions with the fix:
+`reachFixedGcDrops` fails `NeverGcDropsB` (400 states, 41 seconds), as
+`reachMainGcDrops` does for `blockingMain` (461 states, 40 seconds). The cost:
+while a stale pin exists, Rule 2 drops no superseded version of any key. After a failed
+pass, versions also stay unstamped until their key changes again. This fix is
+in the model only. It is not in the engine and not tried in Rust.
+
+The trace replay of `blockingPagerPin` on the engine at the pinned rev
+0c9fe0dd9 fails at step 16 with `WrongRead`
+(`blocking_pager_pin_trace_shows_wrong_read`). That shape differs from the
+probe: the row sits in an unbackfilled WAL frame, not in the database file.
+
 ## Exploration passes
 
 Each pass lists what ran and every divergence between the engine and the
@@ -133,6 +270,15 @@ says otherwise.
   14` and `MaxCheckpoints = 6`. 1800 fresh traces of 150 steps (271800
   states), with 284 reader begins on a mark below the WAL end and 2300 reads
   on a stale mark. All replay with no divergence.
+- 2026-11-17, row spec, module `mbtBlocking` (mode B, the passive flag off).
+  The replay compares the version count of every key with the spec chain
+  after each `Gc` step and each B pass. 60 fresh traces of `mbtBlocking` and
+  300 of `mbtBlockingPin` replay at the pinned rev with 0 refused and 0
+  failed. Before the spec `Lwm` counted the begin tick of an unfinished
+  writer, 19 of the 300 failed that check. The bug trace of `blockingPagerPin`
+  fails at step 16 with `WrongRead`. The bug trace of `blockingNoB2Keep`
+  fails at step 11 with `Chain`. 80 fresh passive `mbt` traces replay with 0
+  failed after the `Lwm` change.
 - 2026-11-17, recovery spec, lead `leadA`. Reproduced on turso main as the
   engine bug above.
 - 2026-11-17, 17:43 to 20:49 CET, `scripts/explore.py`, 20 iterations at

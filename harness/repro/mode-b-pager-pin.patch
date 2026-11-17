@@ -1,0 +1,95 @@
+diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
+index 968d6a685..3c4d5b485 100644
+--- a/core/mvcc/database/tests.rs
++++ b/core/mvcc/database/tests.rs
+@@ -5379,3 +5379,90 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+         TursoAllocator,
+     )
+ }
++// Probes for gaps 2 and 14 (mode B, flag off). Append to core/mvcc/database/tests.rs
++// on turso main 2827d0cc1 and run:
++//   cargo test -p turso_core --lib probe_mode_b -- --nocapture --test-threads=1
++
++/// Gap 14: the WAL position that a B checkpoint stamps after its WAL restart.
++/// The stamp is pager.wal_pos() in GcTableRows, after CheckpointWal restarted the WAL.
++#[test]
++fn probe_mode_b_stamp_after_restart() {
++    let db = MvccTestDbNoConn::new_with_random_db();
++    let w = db.connect();
++    let mv = db.get_mvcc_store();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    for i in 0..3 {
++        w.execute(format!("INSERT INTO t VALUES ({i}, 'a')")).unwrap();
++        w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
++        let pos = w.pager.load().wal_pos();
++        let snap = mv.debug_gc_snapshot();
++        println!(
++            "round {i}: wal_pos after TRUNCATE = {pos:?}, rows_versions = {}, durable = {}",
++            snap.rows_versions, snap.durable_txid_max
++        );
++        assert_ne!(pos, (0, 0), "stamp would be WalPos::ORIGIN");
++    }
++    // A reader that begins after the restart pins a mark at or above the stamp.
++    let r = db.connect();
++    r.execute("BEGIN").unwrap();
++    let rows = get_rows(&r, "SELECT k FROM t");
++    println!("reader after restart: wal_pos = {:?}, rows = {}", r.pager.load().wal_pos(), rows.len());
++    r.execute("COMMIT").unwrap();
++}
++
++/// Gap 2, question 1: a pager read mark taken without the blocking gate (what
++/// force_reparse_schema and maybe_reparse_schema do before reparse_schema
++/// begins its MVCC tx). The B checkpoint gets Busy at CheckpointWal after its
++/// publish. Rule 2 B form then drops the delete version (e <= ckpt_max, no
++/// materialized_at test), and the reader adopts its old mark.
++#[test]
++fn probe_mode_b_pager_pin_after_failed_publish() {
++    let db = MvccTestDbNoConn::new_with_random_db();
++    let w = db.connect();
++    let mv = db.get_mvcc_store();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
++    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
++    println!("after ckpt 1: {:?}", mv.debug_gc_snapshot());
++
++    let r = db.connect();
++    let rp = r.pager.load().clone();
++    rp.begin_read_tx().unwrap(); // pager pin, no gate, no MVCC tx
++    println!("reader pinned at {:?}", rp.wal_pos());
++
++    w.execute("DELETE FROM t WHERE k = 1").unwrap();
++    let ck = w.execute("PRAGMA wal_checkpoint(TRUNCATE)");
++    let snap = mv.debug_gc_snapshot();
++    println!("ckpt 2 result: {ck:?}");
++    println!("after ckpt 2: durable = {}, rows_versions = {}", snap.durable_txid_max, snap.rows_versions);
++
++    let dropped = mv.gc_incremental(1000);
++    println!("gc_incremental dropped {dropped}, rows_versions = {}", mv.debug_gc_snapshot().rows_versions);
++
++    let rows = get_rows(&r, "SELECT k, v FROM t");
++    println!("reader rows: {rows:?}");
++    rp.end_read_tx();
++    assert!(rows.is_empty(), "reader saw a row that was deleted before it began: {rows:?}");
++}
++
++/// Control for the probe above: the same steps without the GC. The tombstone
++/// in the chain shadows the B-tree row, so the read is right.
++#[test]
++fn probe_mode_b_pager_pin_after_failed_publish_no_gc() {
++    let db = MvccTestDbNoConn::new_with_random_db();
++    let w = db.connect();
++    let mv = db.get_mvcc_store();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
++    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
++    let r = db.connect();
++    let rp = r.pager.load().clone();
++    rp.begin_read_tx().unwrap();
++    w.execute("DELETE FROM t WHERE k = 1").unwrap();
++    let ck = w.execute("PRAGMA wal_checkpoint(TRUNCATE)");
++    println!("ckpt 2 result: {ck:?}, rows_versions = {}", mv.debug_gc_snapshot().rows_versions);
++    let rows = get_rows(&r, "SELECT k, v FROM t");
++    println!("reader rows without GC: {rows:?}");
++    rp.end_read_tx();
++    assert!(rows.is_empty());
++}
