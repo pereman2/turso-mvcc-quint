@@ -49,6 +49,11 @@
  *            dropped.
  *   Alters   ALTER TABLE ADD COLUMN: a second version of the sqlite_schema
  *            row with the same rowid and a new version id (#8077).
+ *   CatalogReads  a reader scans sqlite_schema through the dual cursor,
+ *            and GC drops the versions of sqlite_schema rows (#8093,
+ *            #8094). Each object is one row of sqlite_schema. GC drops the
+ *            whole chain of a row in one step. A scan is one atomic step.
+ *            The catalog configurations keep Alters off.
  *
  * Not modeled: row updates and deletes, more than one ALTER per table,
  * writes through a stale root page other than a read, readers that see
@@ -84,6 +89,7 @@ module MvccPassiveSchema {
   const Indexes: Set[str]       // Objects that are indexes of IdxTable. Set() = no indexes.
   const IdxTable: str           // The table that the indexes belong to.
   const Alters: bool            // true: ALTER TABLE ADD COLUMN is possible.
+  const CatalogReads: bool      // true: readers scan sqlite_schema, and GC drops its versions.
 
   // Special cases of the code today. true in the main configuration.
   const GuardMatCheck: bool          // is_btree_readable_at: materialized_at <= read_mark
@@ -100,6 +106,8 @@ module MvccPassiveSchema {
   const GuardEndedCreated: bool      // publish adds ended created roots to dropped roots (#7956)
   const GuardFreedOnly: bool         // publish clears only freed roots from dropped roots (#7957)
   const GuardRefreshRoot: bool       // is_btree_allocated: a negative root takes the binding's page (#8537)
+  const GuardCatalogGcFloor: bool    // GC of a sqlite_schema version: materialized_at <= floor
+  const GuardCatalogGcLwm: bool      // GC of a sqlite_schema version: Rule 2 e <= lwm, Rule 3 idle
   const GuardFrozenMark: bool        // every statement of a transaction reads pages at the
                                      // WAL mark that its begin pinned
 
@@ -132,11 +140,19 @@ module MvccPassiveSchema {
   // none), r1 and r2 = rootpage column of version 1 [c, a) and version 2
   // [a, d).
   type Cat = { c: int, d: int, a: int, r1: int, r2: int }
-  type Ddl = { pc: str, o: str, kind: str, ts: int, hdr: int, sch: str -> int, dr: Set[int] }
+  // mark: with CatalogReads, the WAL mark that the DDL transaction pinned at
+  // its begin. The passive backfill stops at it. 0 otherwise.
+  type Ddl = { pc: str, o: str, kind: str, ts: int, hdr: int, sch: str -> int, dr: Set[int],
+               mark: int }
   type Version = { b: int, e: int, value: int, mat: int }
   type Ins = { ts: int, id: int }
   // A RootEntry of table_id_to_rootpage. in = false: no entry.
   type Bind = { in: bool, root: int, begin: int, end: int, mat: int }
+  // The version store chain of the sqlite_schema row of an object. gone: GC
+  // dropped it. mat: materialized_at of its newest state (0 = not stamped).
+  // tomb: a DROP or ALTER ran after GC dropped the chain, so the chain starts
+  // with a tombstone (begin = None) and has no version older than that DDL.
+  type SCat = { gone: bool, mat: int, tomb: bool }
   type Cell = { own: str, value: int }
   type Image = { img: int -> Cell, bcat: str -> int, meta: int }
   type Op = { op: str, o: str, p: int, t: int }
@@ -167,6 +183,7 @@ module MvccPassiveSchema {
   var tid: str -> int            // tid[o]: the temporary table id that CREATE gave o.
   var chain: str -> Set[Version] // chain[o]: versions of the row of o in the version store.
   var ins: str -> Ins            // ins[o]: [ts, id] of the row insert and its log record id.
+  var scat: str -> SCat          // scat[o]: the version store chain of the sqlite_schema row of o.
                                  // An index row comes with the insert of its table row.
   var bind: str -> Bind          // table_id_to_rootpage: bind[o] is the RootEntry of tid[o].
   var wal: List[Image]           // WAL frames. Frame i is wal[i - 1].
@@ -190,6 +207,7 @@ module MvccPassiveSchema {
   pure val NoBind: Bind = { in: false, root: 0, begin: 0, end: Inf, mat: 0 }
   pure val NoCat: Cat = { c: 0, d: Inf, a: 0, r1: 0, r2: 0 }
   pure val NoIns: Ins = { ts: 0, id: 0 }
+  pure val NoSCat: SCat = { gone: false, mat: 0, tomb: false }
 
   // An ErrRec with only the fields that every kind has.
   pure def ErrOf(kind: str, reader: str, o: str, b: int): ErrRec =
@@ -242,7 +260,7 @@ module MvccPassiveSchema {
   }
 
   pure val IdleDdl: Ddl = { pc: "none", o: "none", kind: "none", ts: 0, hdr: 0,
-                            sch: Objs.mapBy(o => 0), dr: Set() }
+                            sch: Objs.mapBy(o => 0), dr: Set(), mark: 0 }
 
   pure val IdleRd: RdState = { pc: "idle", o: "none", root: 0, gen: 0, cookie: 0, mark: 0,
                                pm: 0, b: 0, tid: "none" }
@@ -258,6 +276,8 @@ module MvccPassiveSchema {
   // Initial state
 
   action Init = all {
+    // The catalog parts do not model ALTER. With both on, no state exists.
+    not(CatalogReads and Alters),
     clock' = 0,
     lastCommitted' = 0,
     cat' = Objs.mapBy(o => NoCat),
@@ -273,6 +293,7 @@ module MvccPassiveSchema {
     tid' = Objs.mapBy(o => 0),
     chain' = Objs.mapBy(o => Set()),
     ins' = Objs.mapBy(o => NoIns),
+    scat' = Objs.mapBy(o => NoSCat),
     bind' = Objs.mapBy(o => NoBind),
     wal' = List(),
     nBackfill' = 0,
@@ -295,7 +316,7 @@ module MvccPassiveSchema {
   }
 
   // Keeps the row variables as they are.
-  action UnchangedRowVars = all { chain' = chain, ins' = ins }
+  action UnchangedRowVars = all { chain' = chain, ins' = ins, scat' = scat }
 
   // Keeps the store variables as they are.
   action UnchangedStoreVars = all {
@@ -337,6 +358,7 @@ module MvccPassiveSchema {
            else if (kind == "alter") cat.setBy(o, x => { ...x, r2: x.r1 })
            else cat,
     ddl' = { pc: "exec", o: o, kind: kind, ts: 0, hdr: cookie,
+             mark: if (CatalogReads) wal.length() else 0,
              sch: pub.set(o, if (kind == "create") nextId else 0),
              dr: if (kind == "drop" and pub.get(o) > 0) droppedRoots.union(Set(pub.get(o)))
                  else droppedRoots },
@@ -345,9 +367,19 @@ module MvccPassiveSchema {
     bind' = if (kind == "create") bind.set(o, { ...NoBind, in: true }) else bind,
     clock' = clock, lastCommitted' = lastCommitted, cookie' = cookie,
     pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots,
-    ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill, db' = db,
+    ddlLog' = ddlLog, chain' = chain, ins' = ins,
+    // The statement writes a version of the sqlite_schema row with a TxID,
+    // and the stamp goes back to none (mod.rs:10989-11002). A chain that GC
+    // dropped gets a tombstone for the B-tree row (mod.rs:5759-5809).
+    scat' = if (CatalogReads)
+              scat.set(o, { ...NoSCat,
+                            tomb: kind != "create" and (scat.get(o).gone or scat.get(o).tomb) })
+            else scat,
+    wal' = wal, nBackfill' = nBackfill, db' = db,
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
-    seen' = seen, err' = err,
+    seen' = if (CatalogReads and kind != "create" and scat.get(o).gone)
+              seen.union(Set("CatalogTomb")) else seen,
+    err' = err,
   }
 
   action DdlPrepare: bool = {
@@ -363,8 +395,10 @@ module MvccPassiveSchema {
                else { ...x, a: ts }),
       lastCommitted' = lastCommitted, cookie' = cookie, pubCookie' = pubCookie,
       gen' = gen, pub' = pub, droppedRoots' = droppedRoots, nextId' = nextId, tid' = tid,
-      ddlLog' = ddlLog, UnchangedRowVars, UnchangedStoreVars, rd' = rd, seen' = seen,
-      err' = err,
+      ddlLog' = ddlLog, chain' = chain, ins' = ins,
+      // The commit rewrites the TxID of its version, which resets the stamp.
+      scat' = if (CatalogReads) scat.setBy(ddl.o, x => { ...x, mat: 0 }) else scat,
+      UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
     }
   }
 
@@ -423,6 +457,7 @@ module MvccPassiveSchema {
                  if (ws.contains(x)) Set({ b: ts, e: Inf, value: ts, mat: 0 })
                  else chain.get(x)),
       ins' = Objs.mapBy(x => if (ws.contains(x)) { ts: ts, id: LogId(x) } else ins.get(x)),
+      scat' = scat,
       UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
     }
   }
@@ -582,6 +617,81 @@ module MvccPassiveSchema {
       }
     },
     rd' = rd.setBy(r, x => { ...x, pc: "active" }),
+    UnchangedForReaders,
+  }
+
+  // The sqlite_schema row of x is in the version store.
+  def InCatStore(x: str): bool = cat.get(x).c != 0 and not(scat.get(x).gone)
+
+  // The newest DDL timestamp of the row of x, Preparing or not.
+  def CatLast(x: str): int = {
+    val ts = Set(cat.get(x).c, cat.get(x).a, cat.get(x).d).filter(t => t != 0 and t != Inf)
+    if (ts == Set()) 0 else Max(ts)
+  }
+
+  // The version store has a version of x that is visible at b. After a
+  // tombstone, only versions from the newest DDL on are in the store.
+  def CatStoreVisible(x: str, b: int): bool = and {
+    InCatStore(x), LiveAt(x, b),
+    not(scat.get(x).tomb and b < CatLast(x)),
+    // A tombstone of a DDL that has not taken its timestamp is all that the
+    // chain has, and it is never visible.
+    not(scat.get(x).tomb and ddl.pc == "exec" and ddl.o == x),
+  }
+
+  // is_btree_invalidating_version: a version visible at b, or one that ended
+  // before b, hides the B-tree row. A version that begins after b does not.
+  def CatShadows(x: str, b: int): bool =
+    InCatStore(x) and or {
+      CatStoreVisible(x, b),
+      cat.get(x).d != Inf and cat.get(x).d < b,
+      cat.get(x).a != 0 and cat.get(x).a < b,
+    }
+
+  // The number of rows of x that a scan of sqlite_schema returns at
+  // snapshot b with page reads at WAL mark m: the visible version from the
+  // version store, plus the B-tree row unless the chain hides it.
+  def CatRows(x: str, b: int, m: int): int =
+    (if (CatStoreVisible(x, b)) 1 else 0)
+    + (if (BtreeAt(m).bcat.get(x) != 0 and not(CatShadows(x, b))) 1 else 0)
+
+  // A new statement of an active reader scans sqlite_schema through the dual
+  // cursor (SELECT ... FROM sqlite_schema, #8093, #8094). The sqlite_schema
+  // B-tree (page 1) is always readable. The scan is one atomic step.
+  action ReaderReadCatalog(r: str): bool = all {
+    CatalogReads,
+    rd.get(r).pc == "active",
+    {
+      val b = rd.get(r).b
+      val m = NewPm(r)
+      val got = Objs.filter(x => CatRows(x, b, m) > 0)
+      val wrong = Objs.filter(x => CatRows(x, b, m) != (if (LiveAt(x, b)) 1 else 0))
+      // Two generations: the scan returns an object and one that was created
+      // at or after its drop, as a DROP and a CREATE of one name.
+      val gens = tuples(got, got).filter(((x, y)) =>
+                   x != y and cat.get(x).d != Inf and cat.get(y).c >= cat.get(x).d)
+      all {
+        err' = err
+          .union(wrong.map(x => { kind: "catalog", reader: r, o: x, b: b, tid: "", mark: m,
+                                  got: CatRows(x, b, m),
+                                  want: if (LiveAt(x, b)) 1 else 0,
+                                  btree: "", snap: 0 }))
+          .union(gens.map(((x, y)) => { ...ErrOf("catalog-gen", r, x, b), tid: y, mark: m })),
+        seen' = seen
+          .union(if (Objs.exists(x => cat.get(x).c > b and LastImg.bcat.get(x) != 0))
+                   Set("CatalogNewer") else Set())
+          .union(if (tuples(Objs, Objs).exists(((x, y)) => and {
+                       x != y, LiveAt(x, b), cat.get(x).d != Inf,
+                       cat.get(y).c >= cat.get(x).d, cat.get(y).c > b,
+                       LastImg.bcat.get(x) == 0, LastImg.bcat.get(y) != 0,
+                     }))
+                   Set("CatalogGenerations") else Set())
+          .union(if (Objs.exists(x => LiveAt(x, b) and not(CatStoreVisible(x, b))
+                                      and BtreeAt(m).bcat.get(x) != 0))
+                   Set("CatalogFromBtree") else Set()),
+      }
+    },
+    rd' = rd,
     UnchangedForReaders,
   }
 
@@ -810,6 +920,7 @@ module MvccPassiveSchema {
         if (ck.written.contains(o)) chain.get(o).map(v =>
           if (v.b <= ck.snap) { ...v, mat: wal.length() + 1 } else v)
         else chain.get(o)) else chain,
+      scat' = if (FixStampAtPagerCommit and write) StampCatalog(wal.length() + 1) else scat,
       err' = err,
     }
   }
@@ -915,7 +1026,11 @@ module MvccPassiveSchema {
 
   // PASSIVE WAL checkpoint: never past the lowest pinned read mark.
   action CheckpointBackfill: bool = {
-    val limit = Min(Pinned.map(r => rd.get(r).mark).union(Set(wal.length())))
+    // With CatalogReads, an open DDL transaction holds its WAL mark too, as
+    // WritersPinMarks of MvccPassiveCheckpoint.qnt. backfill_floor and so
+    // catalog GC depend on it.
+    val ddlMark = if (CatalogReads and ddl.pc != "none") Set(ddl.mark) else Set()
+    val limit = Min(Pinned.map(r => rd.get(r).mark).union(Set(wal.length())).union(ddlMark))
     all {
       ck.pc == "published",
       nondet upTo = nBackfill.to(limit).oneOf()
@@ -938,6 +1053,38 @@ module MvccPassiveSchema {
     UnchangedForCheckpoint, err' = err,
   }
 
+  // The newest committed event of the sqlite_schema row of o: its drop, its
+  // ALTER, or its create. 0 when none.
+  def CatTerm(o: str): int = {
+    val ts = Set(cat.get(o).c, cat.get(o).a, cat.get(o).d)
+               .filter(t => t != 0 and t != Inf and Resolved(t))
+    if (ts == Set()) 0 else Max(ts)
+  }
+
+  // stamp_chain_materialized on the sqlite_schema rows of this pass: a row
+  // whose newest event is in the window is in the B-tree at this frame. A
+  // drop after the snapshot leaves the row unstamped. So does an open DDL
+  // on the row, whose version still carries its TxID.
+  def StampCatalog(frame: int): str -> SCat =
+    if (not(CatalogReads) or frame == 0) scat
+    else Objs.mapBy(o =>
+      if (and {
+            InWindow(CatTerm(o)), not(scat.get(o).gone),
+            not(ddl.pc != "none" and ddl.o == o),
+          })
+        { ...scat.get(o), mat: frame }
+      else scat.get(o))
+
+  // The sqlite_schema chains after the stamp and the GC of CheckpointFinish.
+  val FinishCatalog: str -> SCat = {
+    val st = StampCatalog(ck.frame)
+    val ddlMark = if (CatalogReads and ddl.pc != "none") Set(ddl.mark) else Set()
+    val floor = Min(Pinned.map(r => rd.get(r).mark).union(Set(nBackfill)).union(ddlMark))
+    Objs.mapBy(o =>
+      if (CatalogReads and CatGcOk(o, st.get(o), floor)) { ...NoSCat, gone: true }
+      else st.get(o))
+  }
+
   // TruncateWal and the stamp: set backfill_floor, stamp the row versions
   // that this pass wrote, and drop retired bindings (gc_rootpage_entries).
   action CheckpointFinish: bool = all {
@@ -947,6 +1094,13 @@ module MvccPassiveSchema {
                if (ck.written.contains(o))
                  chain.get(o).map(v => if (v.b <= ck.snap) { ...v, mat: ck.frame } else v)
                else chain.get(o)),
+    // GcTableRows and the passive Finalize sweep run the same rules on every
+    // row, with the pager-pinned readers and the new backfill_floor as the
+    // floor (gc_floor_reader_mark, checkpoint_state_machine.rs:2237-2250).
+    scat' = FinishCatalog,
+    seen' = if (Objs.exists(o => FinishCatalog.get(o).gone and not(scat.get(o).gone)
+                                 and CatDropped(o)))
+              seen.union(Set("CatalogGcDropped")) else seen,
     bind' = Objs.mapBy(x =>
               if (bind.get(x).in and bind.get(x).end != Inf
                   and (not(GuardBindingGcLwm) or bind.get(x).end <= Lwm))
@@ -955,7 +1109,7 @@ module MvccPassiveSchema {
     ck' = { ...IdleCk, history: ck.history },
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
     wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable, nCk' = nCk,
-    rd' = rd, seen' = seen, err' = err,
+    rd' = rd, err' = err,
   }
 
   action CheckpointFail(at: str): bool = all {
@@ -996,7 +1150,43 @@ module MvccPassiveSchema {
     Lwm == Inf,
     chain' = chain.set(o, Set()),
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
-    UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+    scat' = scat, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+  }
+
+  // gc_version_chain on the sqlite_schema row of o (table id -1). The model
+  // drops the whole chain in one step. Rule 2 drops a dropped row once no
+  // reader began before the drop. Rule 3 drops a live row only when no reader
+  // is open. Both need the newest state in the B-tree for every reader. An
+  // open DDL transaction holds the lwm below MAX (mod.rs:7995-8007), so GC
+  // waits for it.
+  def CatDropped(o: str): bool = cat.get(o).d != Inf and Resolved(cat.get(o).d)
+
+  // An open DDL transaction began after every committed drop, so it never
+  // holds Rule 2 back. Its own row has no stamp (DdlExec).
+  def CatGcOk(o: str, x: SCat, floor: int): bool = {
+    val d = cat.get(o).d
+    val dropped = CatDropped(o)
+    and {
+      cat.get(o).c != 0,
+      not(x.gone),
+      x.mat != 0,
+      GuardCatalogGcFloor implies x.mat <= floor,
+      GuardCatalogGcLwm implies (if (dropped) d <= Lwm else (Lwm == Inf and ddl.pc == "none")),
+    }
+  }
+
+  action GcCatalog(o: str): bool = {
+    all {
+      CatalogReads,
+      // compute_min_reader_mark counts the read mark of an open DDL. The
+      // backfill limit already keeps backfillFloor at or below it.
+      CatGcOk(o, scat.get(o), Min(Set(GcFloor).union(
+        if (ddl.pc != "none") Set(ddl.mark) else Set()))),
+      scat' = scat.set(o, { ...NoSCat, gone: true }),
+      seen' = if (CatDropped(o)) seen.union(Set("CatalogGcDropped")) else seen,
+      clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, chain' = chain,
+      ins' = ins, UnchangedStoreVars, rd' = rd, err' = err,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1024,6 +1214,7 @@ module MvccPassiveSchema {
         ReaderBegin(r, inner),
         ReaderOpen(r),
         ReaderRead(r),
+        ReaderReadCatalog(r),
         ReaderEnd(r),
       },
     },
@@ -1042,6 +1233,8 @@ module MvccPassiveSchema {
     CheckpointFinish,
     nondet o = Objs.oneOf()
     Gc(o),
+    nondet o = Objs.oneOf()
+    GcCatalog(o),
   }
 
   // ---------------------------------------------------------------------------
@@ -1050,6 +1243,14 @@ module MvccPassiveSchema {
   // A reader reads only its own table's pages, and gets the row of its table
   // at begin_ts.
   val ReadsCorrect: bool = not(err.exists(e => e.kind == "read"))
+
+  // A scan of sqlite_schema returns one row for each object that exists at
+  // the reader's snapshot, and no other row (#8093).
+  val CatalogReadsCorrect: bool = not(err.exists(e => e.kind == "catalog"))
+
+  // A scan of sqlite_schema never returns a dropped object together with an
+  // object created at or after the drop (#8094).
+  val CatalogNoTwoGenerations: bool = not(err.exists(e => e.kind == "catalog-gen"))
 
   // No reader hits a panic (unmapped page, negative page), and no open fails
   // for a table that the reader's snapshot sees.
@@ -1242,6 +1443,20 @@ module MvccPassiveSchema {
   val NeverSchemaUpdatedGen: bool = not(seen.contains("SchemaUpdatedGen"))
   val NeverBusy: bool = not(seen.contains("Busy"))
   val NeverReadsOldOwner: bool = not(seen.contains("ReadOldOwner"))
+  // A catalog scan runs while the newest frame has the row of a table that
+  // the reader's snapshot does not see (the shape of #8093).
+  val NeverCatalogNewer: bool = not(seen.contains("CatalogNewer"))
+  // A catalog scan runs while the newest frame has the next generation of a
+  // table that the reader sees, and not the old one (the shape of #8094).
+  val NeverCatalogGenerations: bool = not(seen.contains("CatalogGenerations"))
+  // GC drops the sqlite_schema chain of a dropped table (Rule 2).
+  val NeverCatalogGcDropped: bool = not(seen.contains("CatalogGcDropped"))
+  // A DROP runs on a table whose sqlite_schema chain GC dropped, so the
+  // chain gets a tombstone.
+  val NeverCatalogTomb: bool = not(seen.contains("CatalogTomb"))
+  // A catalog scan returns a row from the B-tree because GC dropped its
+  // versions from the version store.
+  val NeverCatalogFromBtree: bool = not(seen.contains("CatalogFromBtree"))
   // Recovery replays a row record above the boundary.
   val NeverReplaysRow: bool =
     not(Objs.exists(o => LoggedLive(o) and ins.get(o).ts > Meta and Meta > 0))
