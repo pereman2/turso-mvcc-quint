@@ -7,6 +7,8 @@ Each iteration runs one heavy job at `nice -n 10`, in turn:
            of copies of each main configuration with larger bounds.
   traces   fresh random traces of the row spec (`mbt` and a larger copy),
            replayed on the engine by `row_traces_from_folder`.
+  group    fresh random traces of the group commit spec (`mbt`), replayed
+           by `group_traces_from_folder`.
   witness  targeted searches: each witness is the negation of an interesting
            state, so the simulator must reach it. Row witness traces are
            replayed on the engine. Recovery and abort witnesses are checked
@@ -23,7 +25,7 @@ trace file. `explore-out/stats.json` holds the totals. Create
 `explore-out/STOP` to stop after the current job.
 
 Usage: scripts/explore.py   (run it with nohup; the environment must give
-Java 17 on PATH, and SDKROOT on macOS hosts whose default SDK does not link)
+Java 21 on PATH (Apalache needs 21), and SDKROOT on macOS hosts whose default SDK does not link)
 """
 
 import glob
@@ -283,24 +285,38 @@ def replay_binary(stats):
     return stats["binary"]
 
 
-def replay(stats, folder, label):
+REPLAY_TESTS = {
+    "MvccPassiveCheckpoint": "mbt_tests::rows::row_traces_from_folder",
+    "MvccGroupCommit": "mbt_tests::group::group_traces_from_folder",
+}
+
+
+def replay(stats, folder, label, spec="MvccPassiveCheckpoint"):
     binary = replay_binary(stats)
     if not binary:
         return
     env = dict(os.environ, MBT_TRACES=folder)
-    code, out = run([binary, "mbt_tests::rows::row_traces_from_folder", "--ignored",
+    code, out = run([binary, REPLAY_TESTS[spec], "--ignored",
                      "--nocapture", "--test-threads", "1"], cwd=os.path.join(TURSO, "core"),
                     env=env, timeout=JOB_TIMEOUT * 2)
-    summary = re.findall(r"(\d+) traces: (\d+) replayed, (\d+) refused, (\d+) failed", out)
-    if not summary:
+    total = len(glob.glob(os.path.join(folder, "*.itf.json")))
+    rows = re.findall(r"(\d+) traces: (\d+) replayed, (\d+) refused, (\d+) failed", out)
+    group = re.findall(r"(\d+) traces replayed, (\d+) refused", out)
+    if rows:
+        total, done, refused, failed = map(int, rows[-1])
+    elif group:
+        done, refused = map(int, group[-1])
+        failed = total - done - refused
+    elif "panicked at" in out:
+        done, refused, failed = 0, 0, 1
+    else:
         log(f"ERROR replay {label}: no summary (exit {code}): {out.strip()[-600:]}")
         return
-    total, done, refused, failed = map(int, summary[-1])
-    bump(stats, "MvccPassiveCheckpoint", "replayed_traces", done)
-    bump(stats, "MvccPassiveCheckpoint", "refused_traces", refused)
-    bump(stats, "MvccPassiveCheckpoint", "diverged_traces", failed)
+    bump(stats, spec, "replayed_traces", done)
+    bump(stats, spec, "refused_traces", refused)
+    bump(stats, spec, "diverged_traces", failed)
     states = sum(itf_states(p) for p in glob.glob(os.path.join(folder, "*.itf.json")))
-    bump(stats, "MvccPassiveCheckpoint", "replayed_states", states)
+    bump(stats, spec, "replayed_states", states)
     log(f"replay {label}: {total} traces, {states} states: {done} replayed, {refused} refused, {failed} failed")
     for m in re.finditer(r"panicked at [^\n]*\n([^\n]*)", out):
         msg = m.group(1)
@@ -358,7 +374,8 @@ def job_sim(stats, rng, it):
                 return
 
 
-def row_traces(stats, rng, label, path, module, count, steps):
+def row_traces(stats, rng, label, path, module, count, steps, safety=ROW_SAFETY,
+               spec="MvccPassiveCheckpoint", prefix="t"):
     folder = os.path.join(OUT, "run", label)
     shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(folder)
@@ -366,8 +383,8 @@ def row_traces(stats, rng, label, path, module, count, steps):
     while made < count:
         seed = rng.randrange(1, 2**31)
         n = min(300, count - made)
-        res, out = quint_run(path, module, ROW_SAFETY, seed, n, steps,
-                             itf=os.path.join(folder, f"t{made}-s{seed}_{{seq}}.itf.json"),
+        res, out = quint_run(path, module, safety, seed, n, steps,
+                             itf=os.path.join(folder, f"{prefix}{made}-s{seed}_{{seq}}.itf.json"),
                              n_traces=n, mbt=True)
         if res != "ok":
             log(f"{'VIOLATION' if res == 'violation' else 'ERROR'} traces {label} {module} seed={seed}: {res}: {out.strip()[-400:]}")
@@ -376,8 +393,24 @@ def row_traces(stats, rng, label, path, module, count, steps):
                 shutil.copytree(folder, keep, dirs_exist_ok=True)
             return None
         made += n
-    bump(stats, "MvccPassiveCheckpoint", "generated_traces", made)
+    bump(stats, spec, "generated_traces", made)
     return folder
+
+
+def job_group(stats, rng, it):
+    path = os.path.join(SPECS, "MvccGroupCommitConfigs.qnt")
+    if not os.path.exists(path) or "group_traces_from_folder" not in open(
+            os.path.join(REPO, "harness", "mbt_tests", "group.rs")).read():
+        return
+    invs = dict((m, i) for m, _, i in configs(path)).get("mbt")
+    for steps in rng.sample([30, 60, 100], 2):
+        label = f"group-it{it}-steps{steps}"
+        folder = row_traces(stats, rng, label, path, "mbt", rng.choice([600, 900]), steps,
+                            safety=invs, spec="MvccGroupCommit", prefix="MvccGroupCommit-")
+        if folder:
+            replay(stats, folder, label, spec="MvccGroupCommit")
+        if stop_requested():
+            return
 
 
 def job_traces(stats, rng, it):
@@ -502,7 +535,8 @@ def main():
     os.makedirs(os.path.join(OUT, "run"), exist_ok=True)
     stats = load_stats()
     rng = random.Random(int.from_bytes(os.urandom(8), "little"))
-    jobs = [("traces", job_traces), ("sim", job_sim), ("witness", job_witness), ("verify", job_verify)]
+    jobs = [("traces", job_traces), ("sim", job_sim), ("group", job_group), ("witness", job_witness),
+            ("verify", job_verify)]
     log(f"start pid={os.getpid()} repo={REPO} turso={TURSO}")
     while not stop_requested():
         it = stats["iterations"] + 1
