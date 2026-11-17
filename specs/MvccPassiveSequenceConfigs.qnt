@@ -3,15 +3,19 @@
 // result to expect and the invariants to check. The Makefile reads these
 // comments.
 
-// Expect no error: every special case is on, as in the code today. setval is
-// off: with setval on, the code breaks CompactionKeepsCurrent
-// (module setvalRace).
+// Expect no error: the checkpoint refuses an outer reader on its connection.
+// setval stays off because setvalRace breaks CompactionKeepsCurrent.
 // Invariants: TypeOK ReadsCorrect CompactionKeepsCurrent UniqueValues RecoveryCorrect NoStrandedVersions
 module main {
   import MvccPassiveSequence(
-    MaxVal = 3,
+    MaxVal = 2,
     Txs = Set("t1", "t2"),
-    MaxTs = 8,
+    MaxTs = 6,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -33,6 +37,11 @@ module blockingNoPurge {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -54,6 +63,11 @@ module blocking {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -75,6 +89,11 @@ module cycle {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = true,
@@ -97,6 +116,11 @@ module deleteTsSnapshot {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -118,6 +142,11 @@ module descending {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = false,
     Cycle = false,
@@ -140,6 +169,11 @@ module noDeferDeletes {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 7,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -162,6 +196,11 @@ module noSkipCycle {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 8,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = true,
@@ -184,6 +223,11 @@ module noWatermarkDirection {
     MaxVal = 3,
     Txs = Set("t1", "t2"),
     MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = false,
     Cycle = false,
@@ -206,6 +250,11 @@ module setvalFixed {
     MaxVal = 2,
     Txs = Set("t1", "t2"),
     MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
@@ -228,10 +277,301 @@ module setvalRace {
     MaxVal = 2,
     Txs = Set("t1", "t2"),
     MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
     MaxCheckpoints = 2,
     Ascending = true,
     Cycle = false,
     WithSetval = true,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect ReadsCorrect to fail: inline compaction can remove a version that an open snapshot still needs.
+// Invariants: ReadsCorrect
+module truncateFlagOn {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1", "t2"),
+    MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "truncateFlagOn",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect NoStrandedVersions to fail: Busy stops a published pass before it stamps versions.
+// Invariants: NoStrandedVersions
+module truncateFlagOnStranded {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1", "t2"),
+    MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "truncateFlagOn",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect NeverTruncateBusy to fail: a nonempty pager commit publishes before TRUNCATE fails with a pinned reader.
+// Invariants: NeverTruncateBusy
+module reachTruncateBusy {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1", "t2"),
+    MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "truncateFlagOn",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect NeverPurgesBeforeBusy to fail: Busy follows removal of a version that an open snapshot needs and its B-tree image cannot supply.
+// Invariants: NeverPurgesBeforeBusy
+module reachPurgeBeforeBusy {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1", "t2"),
+    MaxTs = 6,
+    CheckpointOwnerReaders = false,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "truncateFlagOn",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect ReadsCorrect to fail: the checkpoint ends the pager read transaction of an outer snapshot.
+// Invariants: ReadsCorrect
+module ownCheckpoint {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect no error: an outer snapshot keeps its pager read transaction.
+// Invariants: TypeOK ReadsCorrect CompactionKeepsCurrent UniqueValues RecoveryCorrect NoStrandedVersions
+module refuseCheckpointOwner {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect NeverAutoCheckpointOnReader to fail: an inner commit starts and commits a checkpoint on its outer reader connection.
+// Invariants: NeverAutoCheckpointOnReader
+module reachAutoCheckpointOwner {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect no error: early stamps and cleanup publication keep the sequence state complete.
+// Invariants: TypeOK ReadsCorrect CompactionKeepsCurrent UniqueValues RecoveryCorrect NoStrandedVersions
+module rustFix {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = true,
+    FixCleanupPublishes = true,
+    CheckpointFailures = true,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect Safety to fail: the Rust fixes still permit a checkpoint on an outer reader connection.
+// Invariants: Safety
+module rustFixOwner {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = false,
+    FixStampAtPagerCommit = true,
+    FixCleanupPublishes = true,
+    CheckpointFailures = true,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "passive",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect Safety to fail: inline compaction can still lose a snapshot read before Busy.
+// Invariants: Safety
+module rustFixTruncate {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1", "t2"),
+    MaxTs = 6,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = true,
+    FixCleanupPublishes = true,
+    CheckpointFailures = true,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
+    Mode = "truncateFlagOn",
+    GuardWatermarkFollowsDirection = true,
+    GuardDeferDeletes = true,
+    GuardSkipCycle = true,
+    GuardBlockingPurge = true,
+    FixStampSnapshotVersion = false,
+    DeleteTsRule = "clock"
+  ).* from "./MvccPassiveSequence"
+}
+
+// Expect NeverCleanupPublishes to fail: cleanup publishes a failed nonempty sequence pager commit.
+// Invariants: NeverCleanupPublishes
+module reachCleanupPublish {
+  import MvccPassiveSequence(
+    MaxVal = 2,
+    Txs = Set("t1"),
+    MaxTs = 5,
+    CheckpointOwnerReaders = true,
+    FixRefuseCheckpointOwner = true,
+    FixStampAtPagerCommit = true,
+    FixCleanupPublishes = true,
+    CheckpointFailures = true,
+    MaxCheckpoints = 2,
+    Ascending = true,
+    Cycle = false,
+    WithSetval = false,
     Mode = "passive",
     GuardWatermarkFollowsDirection = true,
     GuardDeferDeletes = true,

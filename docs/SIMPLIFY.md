@@ -106,17 +106,24 @@ The model had no such path. Once the path is in the model (PR #11794),
 `ownCheckpointGcBackfillFloor` fails, and a simulator assertion fired in 46 of
 200 seeds. So the reader marks stay in the floor for now.
 
+The same path has a second bug. A checkpoint on the connection of an open MVCC
+transaction ignores that transaction's read mark. SQL reaches it: `nextval`
+inside `BEGIN CONCURRENT` commits an inner transaction, and that commit runs
+the auto-checkpoint. The transaction then reads rows that committed after it
+began, with either floor (`ownCheckpoint`, `ownCheckpointBackfillFloor`).
+
 What still passes in the model: the lowest pinned read mark alone
 (`floorPinned`, and `ownCheckpointGcPinnedFloor` on the new path). A floor of
 only the registered readers is not safe (`floorRegistered` fails). The fix for
 the checkpoint on a reader's own connection is #11831. Larger bounds were not
 run.
 
-- Removes: `rootpage_gc_protected` (`noRootGcProtect`). PR #11794 deletes it.
-  In the model it never changes a GC decision, and a Rust assertion over 200
-  seeds never fired.
+- Removes: `rootpage_gc_protected`. PR #11794 deletes it and makes GC assert
+  `StampsAtOrAfterBinding` on each chain. In the model it never changes a GC
+  decision (`reachRootGuardFires` shows that the model reaches the state where
+  the guard fired), and a Rust assertion over 200 seeds never fired.
 - Keeps: `compute_min_reader_mark` and the merge of two values in
-  `gc_floor_reader_mark`.
+  `gc_floor_reader_mark`, until the fix for that path merges.
 - Size: small.
 
 ### 5. Delete guards that the model does not need

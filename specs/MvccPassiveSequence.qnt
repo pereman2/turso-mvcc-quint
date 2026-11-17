@@ -48,7 +48,7 @@
  * initial row of CREATE SEQUENCE, several sequences, the exclusive-mode
  * path that skips the inner transaction, schema changes and root pages,
  * the dual-cursor double look (a read looks at each chain once), and the
- * GC rules of the blocking mode (both modes use the passive rules).
+ * GC rules of the blocking mode (all three modes use the passive rules).
  *
  * Notes on the Quint code:
  *   - Txs are strings. The model checker sees every order of them.
@@ -67,12 +67,17 @@ module MvccPassiveSequence {
   const MaxVal: int           // Sequence values are 1..MaxVal. They are the row keys.
   const Txs: Set[str]         // Connections.
   const MaxTs: int            // Bound on the clock for transaction begins and commits.
+  const CheckpointOwnerReaders: bool
+  const FixRefuseCheckpointOwner: bool
+  const FixStampAtPagerCommit: bool
+  const FixCleanupPublishes: bool
+  const CheckpointFailures: bool // A pass can stop before it finishes.
   const MaxCheckpoints: int   // Bound on the number of checkpoint passes.
   const Ascending: bool       // true: increment 1, start 1. false: increment -1,
                               // start MaxVal.
   const Cycle: bool           // The sequence is CYCLE.
   const WithSetval: bool      // Connections can call setval.
-  const Mode: str             // "passive" or "blocking" (TRUNCATE) checkpoint.
+  const Mode: str             // "passive", "blocking", or "truncateFlagOn".
 
   // Special cases in the code. true in the main configuration.
   const GuardWatermarkFollowsDirection: bool // Last for ascending, Rewind for descending
@@ -106,9 +111,11 @@ module MvccPassiveSequence {
   type Handed = { ts: int, v: int }
   type ErrRec = { tx: str, b: int, mark: int, got: int, want: int }
   type WalFrame = { w: int -> bool, meta: int }
-  type CkState = { pc: str, snap: int, old: int, wset: int -> bool, frame: int,
-                   seqdel: Set[int] }
-  type TxState = { pc: str, b: int, mark: int, c: int, ins: int, del: Set[int], nv: bool }
+  type PurgedVersion = { k: int, b: int, e: int, mat: int }
+  type CkState = { pc: str, owner: str, auto: bool, history: Set[str], purged: Set[PurgedVersion],
+                   snap: int, old: int, wset: int -> bool, frame: int,
+                   seqdel: Set[int], pagerOwned: bool }
+  type TxState = { pc: str, b: int, mark: int, c: int, ins: int, del: Set[int], nv: bool, outerB: int, outerMark: int, pinned: bool }
 
   var clock: int                 // Last timestamp taken from the logical clock.
   var chain: int -> Set[Version] // chain[k]: set of versions of key k.
@@ -201,7 +208,11 @@ module MvccPassiveSequence {
 
   def RowsFor(b: int, m: int): Set[int] = Vals.filter(k => PresentFor(k, b, m))
 
-  val Registered: Set[str] = Txs.filter(t => tx.get(t).pc != "idle")
+  val Registered: Set[str] = Txs.filter(t => tx.get(t).pc != "idle" or tx.get(t).outerB != 0)
+
+  val Pinned: Set[str] = Txs.filter(t => tx.get(t).pinned)
+  val ReaderMarks: Set[int] =
+    Registered.map(t => if (tx.get(t).outerB != 0) tx.get(t).outerMark else tx.get(t).mark)
 
   // ---------------------------------------------------------------------------
   // Initial state
@@ -217,9 +228,9 @@ module MvccPassiveSequence {
     dbMeta' = 0,
     durable' = 0,
     backfillFloor' = 0,
-    ck' = { pc: "idle", snap: 0, old: 0, wset: EmptyFn, frame: 0, seqdel: Set() },
+    ck' = { pc: "idle", owner: "", auto: false, history: Set(), purged: Set(), snap: 0, old: 0, wset: EmptyFn, frame: 0, seqdel: Set(), pagerOwned: false },
     nCk' = 0,
-    tx' = Txs.mapBy(t => { pc: "idle", b: 0, mark: 0, c: 0, ins: 0, del: Set(), nv: false }),
+    tx' = Txs.mapBy(t => { pc: "idle", b: 0, mark: 0, c: 0, ins: 0, del: Set(), nv: false, outerB: 0, outerMark: 0, pinned: false }),
     writes' = Set(),
     handed' = Set(),
     err' = Set(),
@@ -233,13 +244,40 @@ module MvccPassiveSequence {
   // runs. (The window between the pin and the clock lock is in
   // MvccPassiveCheckpoint.qnt, rule R5.)
   action TxBegin(t: str): bool = all {
+    ck.owner != t or ck.pc == "idle",
     tx.get(t).pc == "idle",
     clock < MaxTs,
     Mode == "blocking" implies ck.pc == "idle",
     clock' = clock + 1,
-    tx' = tx.setBy(t, x => { ...x, pc: "active", b: clock + 1, mark: wal.length() }),
+    tx' = tx.setBy(t, x => { ...x, pc: "active", b: clock + 1, pinned: true,
+      mark: if (x.outerB != 0 and x.pinned) x.outerMark else wal.length() }),
     chain' = chain, lastCommitted' = lastCommitted, llog' = llog, wal' = wal,
     nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, writes' = writes,
+    handed' = handed, err' = err,
+  }
+
+  action OuterBegin(t: str): bool = all {
+    ck.owner != t or ck.pc == "idle",
+    CheckpointOwnerReaders,
+    tx.get(t).pc == "idle", tx.get(t).outerB == 0,
+    clock < MaxTs,
+    Mode == "blocking" implies ck.pc == "idle",
+    clock' = clock + 1,
+    tx' = tx.setBy(t, x => { ...x, outerB: clock + 1, outerMark: wal.length(),
+                            mark: wal.length(), pinned: true }),
+    chain' = chain, lastCommitted' = lastCommitted, llog' = llog, wal' = wal,
+    nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, writes' = writes,
+    handed' = handed, err' = err,
+  }
+
+  action OuterEnd(t: str): bool = all {
+    ck.owner != t or ck.pc == "idle",
+    tx.get(t).pc == "idle", tx.get(t).outerB != 0,
+    tx' = tx.setBy(t, x => { ...x, outerB: 0, pinned: false }),
+    clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+    wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
     backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, writes' = writes,
     handed' = handed, err' = err,
   }
@@ -250,13 +288,21 @@ module MvccPassiveSequence {
                          want: Current(OracleRows(tx.get(t).b)) }))
 
   // SELECT currval-like read of the backing table: Last or Rewind.
-  action TxRead(t: str): bool = all {
-    tx.get(t).pc == "active",
-    err' = ReadErr(t, Current(RowsFor(tx.get(t).b, tx.get(t).mark))),
-    clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
-    wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
-    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, tx' = tx, writes' = writes,
-    handed' = handed,
+  action TxRead(t: str): bool = {
+    val b = if (tx.get(t).outerB != 0) tx.get(t).outerB else tx.get(t).b
+    val mark = if (tx.get(t).outerB != 0) tx.get(t).outerMark else tx.get(t).mark
+    val got = Current(RowsFor(b, mark))
+    val want = Current(OracleRows(b))
+    all {
+      ck.owner != t or ck.pc == "idle",
+      tx.get(t).pc == "active" or (tx.get(t).pc == "idle" and tx.get(t).outerB != 0),
+      err' = if (got == want) err else err.union(Set({ tx: t, b: b, mark: mark,
+                                                      got: got, want: want })),
+      clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+      wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, tx' = tx, writes' = writes,
+      handed' = handed,
+    }
   }
 
   // emit_disk_read_nextval: read the current value, compute the next value,
@@ -265,6 +311,7 @@ module MvccPassiveSequence {
     val rows = RowsFor(tx.get(t).b, tx.get(t).mark)
     val n = NextOf(Current(rows))
     all {
+      ck.owner != t or ck.pc == "idle",
       tx.get(t).pc == "active",
       n != 0,
       err' = ReadErr(t, Current(rows)),
@@ -282,6 +329,7 @@ module MvccPassiveSequence {
   action TxSetval(t: str, v: int): bool = {
     val rows = RowsFor(tx.get(t).b, tx.get(t).mark)
     all {
+      ck.owner != t or ck.pc == "idle",
       WithSetval,
       tx.get(t).pc == "active",
       tx' = tx.setBy(t, x => { ...x, pc: "written", ins: v, del: rows.exclude(Set(v)),
@@ -294,8 +342,9 @@ module MvccPassiveSequence {
   }
 
   action TxEnd(t: str): bool = all {
+    ck.owner != t or ck.pc == "idle",
     tx.get(t).pc == "active",
-    tx' = tx.setBy(t, x => { ...x, pc: "idle" }),
+    tx' = tx.setBy(t, x => { ...x, pc: "idle", pinned: x.outerB != 0 and x.pinned }),
     clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
     wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
     backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, writes' = writes,
@@ -322,17 +371,22 @@ module MvccPassiveSequence {
   // statement then retries with a new inner transaction, which is a new
   // TxBegin in this model. nextval always runs in its own inner transaction,
   // so a connection commits at most one write per TxBegin.
-  action TxCommit(t: str): bool = {
+  action TxCommit(t: str, ckNow: bool): bool = {
+    val auto = ckNow and not(FixRefuseCheckpointOwner and tx.get(t).outerB != 0)
     val b = tx.get(t).b
     val txKeys = tx.get(t).del.union(Set(tx.get(t).ins))
     val c = clock + 1
     val recs = tx.get(t).del.map(k => { ts: c, k: k, p: false })
                  .union(Set({ ts: c, k: tx.get(t).ins, p: true }))
     all {
+      ck.owner != t or ck.pc == "idle",
       tx.get(t).pc == "written",
+      ckNow implies (CheckpointOwnerReaders and Mode == "passive"
+                       and ck.pc == "idle" and nCk < MaxCheckpoints),
       if (txKeys.exists(k => Conflict(k, b))) all {
-        tx' = tx.setBy(t, x => { ...x, pc: "idle" }),
+        tx' = tx.setBy(t, x => { ...x, pc: "idle", pinned: x.outerB != 0 and x.pinned }),
         clock' = clock, chain' = chain, llog' = llog, writes' = writes, handed' = handed,
+        lastCommitted' = lastCommitted, ck' = ck, nCk' = nCk,
       } else all {
         clock < MaxTs,
         clock' = c,
@@ -345,18 +399,24 @@ module MvccPassiveSequence {
         writes' = writes.union(recs.map(r => { ts: r.ts, k: r.k, p: r.p, cmp: false })),
         handed' = if (tx.get(t).nv) handed.union(Set({ ts: c, v: tx.get(t).ins }))
                   else handed,
-        tx' = tx.setBy(t, x => { ...x, pc: "preparing", c: c }),
+        tx' = tx.setBy(t, x => { ...x, pc: if (auto) "idle" else "preparing", c: c,
+          pinned: if (auto) x.outerB != 0 and x.pinned else x.pinned }),
+        lastCommitted' = if (auto) Max(Set(lastCommitted, c)) else lastCommitted,
+        ck' = if (auto) { pc: "collect", owner: t, auto: true, history: ck.history, purged: Set(),
+                          snap: Min(InflightTs.union(Set(c + 1))) - 1,
+                          old: durable, wset: EmptyFn, frame: 0, seqdel: Set(), pagerOwned: false } else ck,
+        nCk' = if (auto) nCk + 1 else nCk,
       },
-      lastCommitted' = lastCommitted, wal' = wal, nBackfill' = nBackfill, db' = db,
-      dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, ck' = ck,
-      nCk' = nCk, err' = err,
+      wal' = wal, nBackfill' = nBackfill, db' = db,
+      dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, err' = err,
     }
   }
 
   action TxFinish(t: str): bool = all {
+      ck.owner != t or ck.pc == "idle",
     tx.get(t).pc == "preparing",
     lastCommitted' = Max(Set(lastCommitted, tx.get(t).c)),
-    tx' = tx.setBy(t, x => { ...x, pc: "idle" }),
+    tx' = tx.setBy(t, x => { ...x, pc: "idle", pinned: x.outerB != 0 and x.pinned }),
     clock' = clock, chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill,
     db' = db, dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor,
     ck' = ck, nCk' = nCk, writes' = writes, handed' = handed, err' = err,
@@ -371,17 +431,21 @@ module MvccPassiveSequence {
 
   // A blocking (TRUNCATE) checkpoint waits for the checkpoint lock, so no
   // transaction is open while it runs.
-  action CheckpointStart: bool = all {
-    ck.pc == "idle",
-    nCk < MaxCheckpoints,
-    Mode == "blocking" implies Registered == Set(),
-    ck' = { pc: "collect", snap: SnapshotTs, old: durable, wset: EmptyFn, frame: 0,
-            seqdel: Set() },
-    nCk' = nCk + 1,
-    clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
-    wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
-    backfillFloor' = backfillFloor, tx' = tx, writes' = writes, handed' = handed,
-    err' = err,
+  action CheckpointStart: bool = {
+    nondet owner = (if (CheckpointOwnerReaders) Registered.filter(t => tx.get(t).pc == "idle").union(Set("")) else Set("")).oneOf()
+    all {
+      (FixRefuseCheckpointOwner and owner != "") implies not(Registered.contains(owner)),
+      ck.pc == "idle",
+      nCk < MaxCheckpoints,
+      Mode == "blocking" implies Registered == Set(),
+      ck' = { pc: "collect", owner: owner, auto: false, history: ck.history, purged: Set(), snap: SnapshotTs, old: durable, wset: EmptyFn, frame: 0,
+              seqdel: Set(), pagerOwned: false },
+      nCk' = nCk + 1,
+      clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+      wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, tx' = tx, writes' = writes, handed' = handed,
+      err' = err,
+    }
   }
 
   def ChangedSince(c: Set[Version], old: int, snap: int): bool =
@@ -402,7 +466,21 @@ module MvccPassiveSequence {
     val ch = Vals.filter(k => ChangedSince(chain.get(k), ck.old, ck.snap))
     all {
       ck.pc == "collect",
-      ck' = { ...ck, pc: "compact", wset: ch.mapBy(k => ExistsAt(chain.get(k), ck.snap)) },
+      ck' = { ...ck, pc: if (ch != Set() or ck.snap > ck.old) "beginPager" else "published",
+              wset: ch.mapBy(k => ExistsAt(chain.get(k), ck.snap)) },
+      clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+      wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, nCk' = nCk, tx' = tx, writes' = writes,
+      handed' = handed, err' = err,
+    }
+  }
+
+  action CheckpointBeginPager: bool = {
+    val stale = ck.owner != "" and tx.get(ck.owner).pinned
+                  and tx.get(ck.owner).mark != wal.length()
+    all {
+      ck.pc == "beginPager",
+      ck' = { ...ck, pc: if (stale) "idle" else "compact", pagerOwned: not(stale) },
       clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
       wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
       backfillFloor' = backfillFloor, nCk' = nCk, tx' = tx, writes' = writes,
@@ -433,7 +511,8 @@ module MvccPassiveSequence {
         ck' = { ...ck, pc: "compacted", seqdel: victims },
         chain' = chain, writes' = writes,
       } else all {
-        ck' = { ...ck, pc: "compacted",
+        ck' = { ...ck, pc: "compacted", purged: if (purge) victims.fold(Set(), (removed, k) => removed.union(
+                  chain.get(k).map(v => { k: k, b: v.b, e: v.e, mat: v.mat }))) else Set(),
                 wset: ck.wset.keys().union(victims).mapBy(k =>
                         if (victims.contains(k)) false else ck.wset.get(k)) },
         chain' = Vals.mapBy(k => if (purge and victims.contains(k)) Set() else chain.get(k)),
@@ -449,12 +528,22 @@ module MvccPassiveSequence {
     val boundary = Max(Set(ck.old, ck.snap))
     val write = ck.wset.keys() != Set() or boundary > ck.old
     all {
-      ck.pc == "compacted",
+      ck.pc == "compacted", ck.pagerOwned,
       wal' = if (write) wal.append({ w: ck.wset, meta: boundary }) else wal,
-      ck' = { ...ck, pc: "committed", frame: if (write) wal.length() + 1 else 0 },
-      clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+      ck' = { ...ck, pc: "committed", frame: if (write) wal.length() + 1 else 0, pagerOwned: false,
+        history: if (ck.auto and ck.owner != "" and write
+                     and tx.get(ck.owner).outerB != 0 and tx.get(ck.owner).pinned)
+                   ck.history.union(Set("autoOwnerCommit")) else ck.history },
+      clock' = clock, lastCommitted' = lastCommitted, llog' = llog,
+      chain' = if (FixStampAtPagerCommit and write) Vals.mapBy(k =>
+        if (ck.wset.keys().contains(k)) chain.get(k).map(v =>
+          if (Resolved(LastEvent(v)) and LastEvent(v) <= ck.snap)
+            { ...v, mat: wal.length() + 1 } else v)
+        else chain.get(k)) else chain,
       nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
-      backfillFloor' = backfillFloor, nCk' = nCk, tx' = tx, writes' = writes,
+      backfillFloor' = backfillFloor, nCk' = nCk,
+      tx' = if (ck.owner == "") tx else tx.setBy(ck.owner, x => { ...x, pinned: false }),
+      writes' = writes,
       handed' = handed, err' = err,
     }
   }
@@ -474,19 +563,26 @@ module MvccPassiveSequence {
 
   // apply_passive_publish_window_ordered: under the clock lock take a new
   // timestamp, apply the recorded deletes with it, publish the boundary.
-  action CheckpointPublish: bool = {
+  action CheckpointPublish: bool = all {
+    ck.pc == "committed",
+    ApplyCheckpointPublish("published", false),
+  }
+
+  action ApplyCheckpointPublish(nextPc: str, failed: bool): bool = {
     val passive = Mode == "passive"
     val ts = if (DeleteTsRule == "clock") clock + 1 else ck.snap
     val ended = ck.seqdel.filter(k => StampDelete(chain.get(k), ts, ck.snap) != chain.get(k))
     all {
-      ck.pc == "committed",
       clock' = if (passive) clock + 1 else clock,
       chain' = Vals.mapBy(k =>
                  if (ck.seqdel.contains(k)) StampDelete(chain.get(k), ts, ck.snap)
                  else chain.get(k)),
       writes' = writes.union(ended.map(k => { ts: ts, k: k, p: false, cmp: true })),
       durable' = Max(Set(ck.old, ck.snap)),
-      ck' = { ...ck, pc: "published" },
+      ck' = { ...ck, pc: nextPc,
+        seqdel: if (failed) Set() else ck.seqdel,
+        history: if (failed and ck.frame > 0 and ck.wset.keys() != Set())
+                   ck.history.union(Set("cleanupPublished")) else ck.history },
       lastCommitted' = lastCommitted, llog' = llog, wal' = wal, nBackfill' = nBackfill,
       db' = db, dbMeta' = dbMeta, backfillFloor' = backfillFloor, nCk' = nCk, tx' = tx,
       handed' = handed, err' = err,
@@ -494,9 +590,10 @@ module MvccPassiveSequence {
   }
 
   action CheckpointBackfill: bool = {
-    val limit = Min(Registered.map(t => tx.get(t).mark).union(Set(wal.length())))
+    val limit = Min(Pinned.map(t => tx.get(t).mark).union(Set(wal.length())))
     all {
       ck.pc == "published",
+      Mode == "truncateFlagOn" implies Pinned == Set(),
       // \E to \in nBackfill..limit is false when the range is empty. "to" is
       // a built-in name in Quint, so the pick is named upTo.
       nBackfill <= limit,
@@ -536,18 +633,54 @@ module MvccPassiveSequence {
                    if (Resolved(LastEvent(v)) and LastEvent(v) <= ck.snap) { ...v, mat: ck.frame }
                    else v)
                else chain.get(k)),
-    ck' = { ...ck, pc: "idle", seqdel: Set() },
+    ck' = { ...ck, pc: "idle", seqdel: Set(), pagerOwned: false },
     clock' = clock, lastCommitted' = lastCommitted, llog' = llog, wal' = wal,
     nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable, nCk' = nCk,
     tx' = tx, writes' = writes, handed' = handed, err' = err,
   }
 
+  action CheckpointFail(at: str): bool = all {
+    CheckpointFailures or (Mode == "truncateFlagOn" and at == "published" and Pinned != Set()),
+    ck.pc == at,
+    if (FixCleanupPublishes and at == "committed") ApplyCheckpointPublish("idle", true)
+    else all {
+      ck' = { ...ck, pc: "idle", seqdel: Set(), pagerOwned: false, history:
+        if (Mode == "truncateFlagOn" and at == "published" and Pinned != Set()
+            and ck.frame > 0 and ck.wset.keys() != Set())
+          ck.history.union(Set("truncateBusy")).union(
+            if (RemovedRowNeeded) Set("purgedBeforeBusy") else Set())
+        else ck.history },
+      clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+      wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, nCk' = nCk,
+      tx' = if (not(ck.pagerOwned) or ck.owner == "") tx
+              else tx.setBy(ck.owner, x => { ...x, pinned: false }),
+      writes' = writes,
+      handed' = handed, err' = err,
+    },
+  }
+
+  val RemovedRowNeeded: bool = ck.purged.exists(v => Registered.exists(t => {
+    val b = if (tx.get(t).outerB != 0) tx.get(t).outerB else tx.get(t).b
+    val mark = if (tx.get(t).outerB != 0) tx.get(t).outerMark else tx.get(t).mark
+    and {
+      tx.get(t).pc == "active" or tx.get(t).outerB != 0,
+      v.b != 0, Resolved(v.b), v.b < b, b < v.e,
+      Current(OracleRows(b)) == v.k,
+      not(BtreeAt(v.k, mark)),
+      not(PresentFor(v.k, b, mark)),
+    }
+  }))
+
   // ---------------------------------------------------------------------------
   // Garbage collection: the passive rules of gc_version_chain
 
-  val Lwm: int = if (Registered == Set()) Inf else Min(Registered.map(t => tx.get(t).b))
+  val Lwm: int = if (Registered == Set()) Inf else Min(Registered.map(t =>
+    if (tx.get(t).outerB == 0) tx.get(t).b
+    else if (tx.get(t).pc == "idle") tx.get(t).outerB
+    else Min(Set(tx.get(t).b, tx.get(t).outerB))))
 
-  val GcFloor: int = Min(Registered.map(t => tx.get(t).mark).union(Set(backfillFloor, Inf)))
+  val GcFloor: int = Min(ReaderMarks.union(Set(backfillFloor, Inf)))
 
   def InBtreeForAllReaders(v: Version): bool = v.mat != 0 and v.mat <= GcFloor
 
@@ -586,17 +719,23 @@ module MvccPassiveSequence {
   action Next = any {
     nondet t = Txs.oneOf()
     any {
+      OuterBegin(t),
+      OuterEnd(t),
       TxBegin(t),
       TxRead(t),
       TxNextval(t),
       nondet v = Vals.oneOf()
       TxSetval(t, v),
       TxEnd(t),
-      TxCommit(t),
+      nondet ckNow = (if (CheckpointOwnerReaders) Bool else Set(false)).oneOf()
+      TxCommit(t, ckNow),
       TxFinish(t),
     },
+    nondet at = Set("collect", "beginPager", "compact", "compacted", "committed", "published", "backfilled", "truncated").oneOf()
+    CheckpointFail(at),
     CheckpointStart,
     CheckpointCollect,
+    CheckpointBeginPager,
     CheckpointCompact,
     CheckpointCommit,
     CheckpointPublish,
@@ -648,6 +787,8 @@ module MvccPassiveSequence {
         (Resolved(LastEvent(v)) and LastEvent(v) <= durable) implies v.mat != 0))
 
   val TypeOK: bool = and {
+    ck.pc == "committed" implies ck.frame > 0,
+    ck.pagerOwned == Set("compact", "compacted").contains(ck.pc),
     clock.in(0.to(MaxTs + MaxCheckpoints)),
     nBackfill.in(0.to(wal.length())),
     wal.length() <= MaxCheckpoints,
@@ -661,6 +802,17 @@ module MvccPassiveSequence {
 
   // ---------------------------------------------------------------------------
   // Reachability checks. Each one must be violated.
+
+  val Safety: bool = and {
+    TypeOK, ReadsCorrect, CompactionKeepsCurrent, UniqueValues, RecoveryCorrect, NoStrandedVersions,
+  }
+
+  val NeverCleanupPublishes: bool = not(ck.history.contains("cleanupPublished"))
+
+  val NeverAutoCheckpointOnReader: bool = not(ck.history.contains("autoOwnerCommit"))
+
+  val NeverTruncateBusy: bool = not(ck.history.contains("truncateBusy"))
+  val NeverPurgesBeforeBusy: bool = not(ck.history.contains("purgedBeforeBusy"))
 
   val NeverRecordsDelete: bool = not(writes.exists(w => w.cmp))
   val NeverCompacts: bool = ck.seqdel == Set()

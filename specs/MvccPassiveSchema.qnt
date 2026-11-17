@@ -76,6 +76,10 @@ module MvccPassiveSchema {
   const Pages: Set[int]         // Page numbers that can be a root page (integers > 1).
   const Readers: Set[str]       // Reader connections.
   const MaxTs: int              // Bound on the logical clock.
+  const FixPublishFailedCommit: bool
+  const FixStampAtPagerCommit: bool
+  const FixCleanupPublishes: bool
+  const CheckpointFailures: bool // A pass can stop before it finishes.
   const MaxCheckpoints: int     // Bound on the number of checkpoint passes.
   const Indexes: Set[str]       // Objects that are indexes of IdxTable. Set() = no indexes.
   const IdxTable: str           // The table that the indexes belong to.
@@ -95,7 +99,6 @@ module MvccPassiveSchema {
   const GuardPatchKeepsEnd: bool     // publish patches the schema row payload, keeps end (#7956)
   const GuardEndedCreated: bool      // publish adds ended created roots to dropped roots (#7956)
   const GuardFreedOnly: bool         // publish clears only freed roots from dropped roots (#7957)
-  const GuardRootGcProtect: bool     // rootpage_gc_protected in GC
   const GuardRefreshRoot: bool       // is_btree_allocated: a negative root takes the binding's page (#8537)
   const GuardFrozenMark: bool        // every statement of a transaction reads pages at the
                                      // WAL mark that its begin pinned
@@ -139,7 +142,8 @@ module MvccPassiveSchema {
   type Op = { op: str, o: str, p: int, t: int }
   type CkState = { pc: str, snap: int, old: int, todo: Set[str], img: int -> Cell,
                    bcat: str -> int, ops: Set[Op], created: Set[str], written: Set[str],
-                   freed: Set[int], dirty: bool, frame: int, hdr: int, cv2: Set[str] }
+                   freed: Set[int], dirty: bool, frame: int, hdr: int, cv2: Set[str],
+                   pending: Set[Op], history: Set[str] }
   // mark: the WAL mark that begin pinned (the gate of is_btree_readable_at).
   // pm: the WAL mark that page reads use. It equals mark with GuardFrozenMark.
   type RdState = { pc: str, o: str, root: int, gen: int, cookie: int, mark: int, pm: int,
@@ -234,7 +238,7 @@ module MvccPassiveSchema {
   pure val IdleCk: CkState = {
     pc: "idle", snap: 0, old: 0, todo: Set(), img: EmptyImg.img, bcat: EmptyImg.bcat,
     ops: Set(), created: Set(), written: Set(), freed: Set(), dirty: false, frame: 0,
-    hdr: 0, cv2: Set(),
+    hdr: 0, cv2: Set(), pending: Set(), history: Set(),
   }
 
   pure val IdleDdl: Ddl = { pc: "none", o: "none", kind: "none", ts: 0, hdr: 0,
@@ -600,9 +604,10 @@ module MvccPassiveSchema {
 
   action CheckpointStart: bool = all {
     ck.pc == "idle",
+    ck.pending == Set(),
     nCk < MaxCheckpoints,
     ck' = { ...IdleCk, pc: "collect", snap: SnapshotTs, old: durable, todo: Objs,
-            img: LastImg.img, bcat: LastImg.bcat },
+            img: LastImg.img, bcat: LastImg.bcat, history: ck.history },
     nCk' = nCk + 1,
     bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
     backfillFloor' = backfillFloor,
@@ -799,7 +804,13 @@ module MvccPassiveSchema {
               frame: if (write) wal.length() + 1 else 0 },
       bind' = bind, nBackfill' = nBackfill, db' = db, durable' = durable,
       backfillFloor' = backfillFloor, nCk' = nCk,
-      UnchangedForCheckpoint, err' = err,
+      clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars,
+      ins' = ins, rd' = rd, seen' = seen,
+      chain' = if (FixStampAtPagerCommit and write) Objs.mapBy(o =>
+        if (ck.written.contains(o)) chain.get(o).map(v =>
+          if (v.b <= ck.snap) { ...v, mat: wal.length() + 1 } else v)
+        else chain.get(o)) else chain,
+      err' = err,
     }
   }
 
@@ -860,14 +871,18 @@ module MvccPassiveSchema {
                      r2: if (pr2) page else cat.get(o).r2 }
   }
 
-  action CheckpointPublish: bool = {
+  action CheckpointPublish: bool = all {
+    ck.pc == "committed",
+    ApplyCheckpointPublish("published", false),
+  }
+
+  action ApplyCheckpointPublish(nextPc: str, failed: bool): bool = {
     val nb = AfterAlloc
     val ended = ck.created.filter(x => Ended(x)).map(o => nb.get(o).root)
     val owned = Objs.exists(o => pub.get(o) < 0 and nb.get(o).in and nb.get(o).root > 0)
     val publish = ck.created != Set() or droppedRoots != Set() or owned
     val dr1 = if (GuardFreedOnly) droppedRoots.exclude(ck.freed) else Set()
     all {
-      ck.pc == "committed",
       bind' = nb,
       // Without GuardPatchKeepsEnd the collected clone replaces the
       // row, and its end is the clamped "live" one.
@@ -885,7 +900,12 @@ module MvccPassiveSchema {
       nextId' = BumpedId,
       cookie' = if (FixHeaderCookieMax) Max(Set(cookie, ck.hdr)) else ck.hdr,
       durable' = Max(Set(ck.old, ck.snap)),
-      ck' = { ...ck, pc: "published" },
+      ck' = { ...ck, pc: nextPc, pending: Set(), ops: if (failed) Set() else ck.ops,
+        history: if (ck.pending != Set() and ck.history.contains("failedCommitted"))
+                   ck.history.union(Set("repairedRoots"))
+                 else if (failed and ck.frame > 0 and ck.ops.exists(op => op.op == "alloc"))
+                   ck.history.union(Set("failedCommitted", "cleanupPublished"))
+                 else ck.history },
       clock' = clock, lastCommitted' = lastCommitted, ddl' = ddl, pubCookie' = pubCookie,
       tid' = tid, ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill,
       db' = db, backfillFloor' = backfillFloor, nCk' = nCk, rd' = rd, seen' = seen,
@@ -910,10 +930,18 @@ module MvccPassiveSchema {
     }
   }
 
+  action CheckpointTruncateLog: bool = all {
+    ck.pc == "backfilled",
+    ck' = { ...ck, pc: "truncated" },
+    bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    backfillFloor' = backfillFloor, nCk' = nCk,
+    UnchangedForCheckpoint, err' = err,
+  }
+
   // TruncateWal and the stamp: set backfill_floor, stamp the row versions
   // that this pass wrote, and drop retired bindings (gc_rootpage_entries).
   action CheckpointFinish: bool = all {
-    ck.pc == "backfilled",
+    ck.pc == "truncated",
     backfillFloor' = nBackfill,
     chain' = Objs.mapBy(o =>
                if (ck.written.contains(o))
@@ -924,10 +952,37 @@ module MvccPassiveSchema {
                   and (not(GuardBindingGcLwm) or bind.get(x).end <= Lwm))
                 NoBind
               else bind.get(x)),
-    ck' = IdleCk,
+    ck' = { ...IdleCk, history: ck.history },
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
     wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable, nCk' = nCk,
     rd' = rd, seen' = seen, err' = err,
+  }
+
+  action CheckpointFail(at: str): bool = all {
+    CheckpointFailures,
+    ck.pc == at,
+    if (FixCleanupPublishes and at == "committed") ApplyCheckpointPublish("idle", true)
+    else all {
+      ck' = { ...ck, pc: "idle", ops: Set(),
+        pending: if (FixPublishFailedCommit and at == "committed") ck.ops else ck.pending,
+        history: if (at == "committed" and ck.frame > 0
+                     and ck.ops.exists(op => op.op == "alloc"
+                       and Frame(ck.frame).img.get(op.p).own == op.o))
+                   ck.history.union(Set("failedCommitted")) else ck.history },
+      bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+      backfillFloor' = backfillFloor, nCk' = nCk,
+      UnchangedForCheckpoint, err' = err,
+    },
+  }
+
+  action CheckpointResumePublish: bool = all {
+    FixPublishFailedCommit,
+    ck.pc == "idle",
+    ck.pending != Set(),
+    ck' = { ...ck, pc: "committed", ops: ck.pending },
+    bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    backfillFloor' = backfillFloor, nCk' = nCk,
+    UnchangedForCheckpoint, err' = err,
   }
 
   // ---------------------------------------------------------------------------
@@ -939,7 +994,6 @@ module MvccPassiveSchema {
     chain.get(o) != Set(),
     chain.get(o).forall(v => v.mat != 0 and v.mat <= GcFloor),
     Lwm == Inf,
-    GuardRootGcProtect implies not(bind.get(o).in and bind.get(o).mat > GcFloor),
     chain' = chain.set(o, Set()),
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
     UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
@@ -973,6 +1027,9 @@ module MvccPassiveSchema {
         ReaderEnd(r),
       },
     },
+    nondet at = Set("collect", "committed", "published", "backfilled", "truncated").oneOf()
+    CheckpointFail(at),
+    CheckpointResumePublish,
     CheckpointStart,
     nondet o = Objs.oneOf()
     CheckpointObj(o),
@@ -981,6 +1038,7 @@ module MvccPassiveSchema {
     CheckpointCommit,
     CheckpointPublish,
     CheckpointBackfill,
+    CheckpointTruncateLog,
     CheckpointFinish,
     nondet o = Objs.oneOf()
     Gc(o),
@@ -1097,6 +1155,24 @@ module MvccPassiveSchema {
   // snapshot (#8077).
   val NoLiveDestroy: bool = not(err.exists(e => e.kind == "destroy-live"))
 
+  // Every stamped version of an object has a stamp at or after the frame of
+  // the object's B-tree binding. GC drops only versions stamped at or below
+  // the floor, so a binding above the floor keeps every version of its object
+  // without a separate guard (rootpage_gc_protected).
+  val StampsAtOrAfterBinding: bool =
+    Objs.forall(o => (bind.get(o).in and bind.get(o).root > 0) implies
+                     chain.get(o).forall(v => v.mat == 0 or v.mat >= bind.get(o).mat))
+
+  // GC is never enabled on an object whose binding is above the floor. The
+  // guard rootpage_gc_protected blocked GC in that state.
+  val GcNeverRunsUnderNewerBinding: bool =
+    not(Objs.exists(o => and {
+      chain.get(o) != Set(),
+      chain.get(o).forall(v => v.mat != 0 and v.mat <= GcFloor),
+      Lwm == Inf,
+      bind.get(o).in, bind.get(o).mat > GcFloor,
+    }))
+
   // The current sqlite_schema row of a live table points at its live B-tree.
   // A negative rootpage is right only while the table has no page.
   def NewestRoot(o: str): int =
@@ -1121,8 +1197,12 @@ module MvccPassiveSchema {
       pub.get(o) < 0 and bind.get(o).in and bind.get(o).root == p,
     })
 
+  val NoLeakedPages: bool =
+    1.to(wal.length()).forall(i => Pages.forall(p =>
+      Frame(i).img.get(p).own != NoObj implies Objs.exists(o => Frame(i).bcat.get(o) == p)))
+
   val PagesAccounted: bool =
-    ck.pc != "committed" implies
+    (ck.pc != "committed" and ck.pending == Set()) implies
       Pages.forall(p => LastImg.img.get(p).own != NoObj
                         implies (SchemaRoot(p) or droppedRoots.contains(p)))
 
@@ -1135,6 +1215,22 @@ module MvccPassiveSchema {
 
   // ---------------------------------------------------------------------------
   // Reachability checks. Each one must be violated.
+
+  // An object with versions has a binding above the floor, so
+  // rootpage_gc_protected would skip it.
+  val Safety: bool = and {
+    TypeOK, ReadsCorrect, OpenCorrect, NoSharedOwner, RecoveryCorrect, PagesAccounted,
+    CookieNotBehind, KindsMatch, NoLiveDestroy, SchemaRowCurrent,
+    StampsAtOrAfterBinding, GcNeverRunsUnderNewerBinding, NoLeakedPages,
+  }
+
+  val NeverCleanupPublishes: bool = not(ck.history.contains("cleanupPublished"))
+
+  val NeverFailsBeforePublish: bool = not(ck.history.contains("failedCommitted"))
+  val NeverRepairsRoots: bool = not(ck.history.contains("repairedRoots"))
+
+  val NeverRootGuardFires: bool =
+    not(Objs.exists(o => chain.get(o) != Set() and bind.get(o).in and bind.get(o).mat > GcFloor))
 
   val NeverReusesPage: bool =
     not(tuples(1.to(wal.length()), 1.to(wal.length())).exists(((i, j)) =>
