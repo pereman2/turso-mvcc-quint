@@ -467,13 +467,15 @@ def job_witness(stats, rng, it):
     rec = os.path.join(SPECS, "MvccRecoveryConfigs.qnt")
     if os.path.exists(rec):
         invs = dict((m, i) for m, _, i in configs(rec))["main"]
-        groups.append(("WitRecovery", rec, "main", RECOVERY_WITNESSES, invs, None))
+        # The larger copy allows two crashes, which some witnesses need.
+        big = write_gen("BigMvccRecovery", bigger(module_text(rec, "main"), "big", rng))
+        groups.append(("WitRecovery", big, "big", RECOVERY_WITNESSES, invs, None))
     steps = rng.choice([40, 60, 100])
     for name, base, module, witnesses, safety, keep_dir in groups:
         path = witness_file(name, base, module, witnesses)
         if not typechecks(path):
             continue
-        spec = spec_name(base)
+        spec = spec_name(base) if base.endswith("Configs.qnt") else os.path.basename(base)[3:-4]
         for w in witnesses:
             for _ in range(rng.choice([3, 5])):
                 seed = rng.randrange(1, 2**31)
