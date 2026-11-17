@@ -37,7 +37,7 @@ only offline, from `specs/Makefile`.
 |---|---|
 | `mbt_tests/mod.rs` | The replay loop, the yield injector, the checkpoint driver and the crash probe |
 | `mbt_tests/itf.rs` | The ITF parser, with `serde_json` |
-| `mbt_tests/rows.rs` | The actions of `MvccPassiveCheckpoint` |
+| `mbt_tests/rows.rs` | The actions of `MvccPassiveCheckpoint`, for the passive flag and for mode B |
 | `mbt_tests/schema.rs` | The actions of `MvccPassiveSchema` that the bug traces use |
 | `mbt_tests/group.rs` | The actions of `MvccGroupCommit`, on a test IO that keeps the fsynced bytes of each file. `DESIGN-group-commit.md` describes it |
 | `mbt_tests/index.rs` | The actions of `MvccPassiveIndex`. It reuses the row driver steps (`DESIGN-indexes.md`) |
@@ -85,6 +85,71 @@ never raw numbers. A writer writes its spec commit timestamp as the row value,
 so a read compares directly with the spec oracle. A passive WAL restarts at
 frame 1 after a full backfill, so the driver counts frames across checkpoint
 sequences.
+
+## Mode B traces
+
+The row driver also replays the traces of the modules `mbtBlocking` and
+`mbtBlockingPin` (`make traces SPECS=MvccPassiveCheckpoint MBT=mbtBlocking`).
+`RowDriver::new_blocking` opens the database with the passive flag off. A B
+pass is one spec step. The driver creates a `CheckpointStateMachine` with
+`CheckpointMode::Truncate`, steps it to the publish window and records the new
+frame, then steps it to the end. It fails with `Failure::CheckpointResult`
+when the engine result differs from the spec.
+
+- `RowDriver::gc` calls `gc_chain_now` on one chain, not `gc_incremental`. So
+  the replay skips the gate try lock, the empty slot unlink and the stuck-`lwm`
+  early return of `gc_incremental`. The sample of `lwm` is the engine one
+  (`sample_gc_lwm`).
+- After each `Gc` step and each B pass, `check_chains` compares the number of
+  versions of every key in the engine (the chain in `rows`) with the size of
+  `chain[k]` in the spec. A difference fails with `Failure::Chain`. The count
+  includes committed versions, Preparing versions and the begin-None marker of
+  a row that only the B-tree had. This replaces the old check "the store is
+  empty after a pass", so a failed pass followed by a successful one replays
+  right. After a failed pass, a successful pass can leave versions in both,
+  and the check compares them.
+- `CheckpointBlockingFail` must return `Busy`. The driver cannot inject an I/O
+  error at `CheckpointWal`, so it refuses such a trace when no reader is
+  pinned. Every failed pass in the replay comes from a pager pin that holds no
+  gate (`pager.begin_read_tx()`, the `PagerPinsWithoutGate` path).
+- In mode B the driver also scans the table (`SELECT k, v FROM t`) at each
+  read, to reach the other look of the dual cursor. The crash copy opens with
+  the flag off.
+- The spec `Lwm` counts the begin tick of a writer that is not finished when
+  `WriterBeginTicks` is on, as the engine does (`compute_lwm`). Before that
+  change, 19 of 300 traces of `mbtBlockingPin` failed the chain check at a
+  `Gc` step, because the spec dropped a version that the engine kept for an
+  unfinished writer.
+
+Run on 2026-11-17 at the pinned rev 0c9fe0dd9:
+
+- 60 fresh traces of `mbtBlocking`: `60 traces: 60 replayed, 0 refused, 0
+  failed`. 300 fresh traces of `mbtBlockingPin` (`PagerPinsWithoutGate` and
+  `FixB2WaitsForPinned` on): `300 traces: 300 replayed, 0 refused, 0 failed`.
+  These traces have 61 and 81 states.
+- 8 committed traces in `generated_blocking_row_traces_conform`. Three are
+  directed: `rows-blocking-gc-read-13` (a `Gc` drop while a reader is open,
+  then a read of that key), `rows-blocking-pin-171` (the same, and a failed pass
+  followed by a successful one that leaves a version) and
+  `rows-blocking-fail-then-pass-220` (a failed pass, then a successful one that
+  leaves a version).
+- The bug trace of `blockingPagerPin`: the engine fails at step 16 with
+  `WrongRead`.
+- The negative control for the chain check, the bug trace of `blockingNoB2Keep`:
+  the engine fails at step 11 with `Chain`. The spec drops the delete marker
+  at the `Gc` step and the engine keeps it.
+- All of `mbt_tests`: 14 passed, 5 ignored.
+
+The engine has no fix of `FixB2WaitsForPinned`. The fixed spec allows no
+`Gc` step while a stale pin exists, so these traces never run the engine GC
+inside the bug window. In the 300 traces, 850 states had a stale pin, and
+none of the 167 `Gc` steps ran in one (a review run). Only the bug trace of
+`blockingPagerPin` tests the engine inside that window.
+
+The `Lwm` change also changes the passive trace module `mbt`, which has
+`WriterBeginTicks` on. 80 fresh `mbt` traces replay at the pinned rev with 0
+refused and 0 failed (a review run). The checked passive modules have it off,
+so their results do not change.
 
 ## Checks after each step
 
@@ -194,6 +259,7 @@ MBT_TRACES=$PWD/specs/traces/bugs harness/run-in-turso.sh -- \
 |---|---|---|
 | `issue11502` | 8 steps | Fails at step 8: after a crash, `t2` exists without its row |
 | `issue11499` | 11 steps | Fails at step 11: the publish writes the header cookie 1 while the shared schema has version 2 |
+| `blockingPagerPin` | 17 steps | Fails at step 16 with `WrongRead`: GC drops a delete after a B pass failed with `Busy`, and a reader with an old mark reads the deleted row |
 
 On a fresh database, the engine gives a new table the temporary id -P and
 then the page P. Recovery then finds the table by chance. The schema driver

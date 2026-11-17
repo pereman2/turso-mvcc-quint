@@ -166,14 +166,18 @@ model reads one key in one step, so it does not show that a real scan is safe.
 
 ### 7. Blocking mode does only what it needs
 
-The specs model only the passive checkpoint, but blocking mode (the flag off)
-runs most of the passive machinery. Every commit marks dirty keys, and the
+The row spec models blocking mode (the flag off) in its own configuration
+(`DESIGN-rows.md`, section "Mode B"). Blocking mode runs most of the passive
+machinery. Every commit marks dirty keys, and the
 checkpoint ends with the GC rules (`MODEL-GAPS.md`, section 2). If a transaction is
 open, a blocking checkpoint fails with `Busy`. Otherwise it writes every change
 and empties the log. So after it, the version store holds nothing that the
 B-tree does not have.
 
-- Rule: after a blocking checkpoint, the version store is empty.
+- Rule: after a blocking checkpoint with no failed pass before it, the
+  version store is empty. A pass that follows a failed pass can leave
+  unstamped versions (`blockingFailAfterPublish`, and the replay traces
+  `rows-blocking-pin-171` and `rows-blocking-fail-then-pass-220`).
 - Code: with the flag off, skip dirty keys, stamps and floors. At the end
   of the checkpoint, remove every entry one by one. Do not call
   `SkipMap::clear`, because it leaves most of the work to later operations.

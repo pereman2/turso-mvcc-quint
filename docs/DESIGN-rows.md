@@ -90,6 +90,9 @@ the WAL, which is at or above every `materialized_at`.
 
 ## WAL restart (not modeled)
 
+This section is about modes P and T. Mode B restarts the WAL inside its atomic
+pass, and the model counts frames across the restart (section "Mode B").
+
 `WalPos` is `(checkpoint_seq, frame)` and compares in that order
 (mod.rs:4265). A passive checkpoint never restarts the WAL. The next pager
 write restarts it in `try_restart_log_before_write` (wal.rs:5367). The restart
@@ -182,7 +185,8 @@ the verdicts.
   finding 1.
 - Aborts after the log append. `cleanup_dropped_commit` treats such a commit
   as committed.
-- WAL restart. See the analysis above, which is not verified.
+- WAL restart in modes P and T. See the analysis above, which is not verified.
+  Mode B models the restart inside its atomic pass.
 - Index keys. They use the same dirty-key code as table keys, with their own
   map.
 
@@ -407,3 +411,249 @@ Counts from an interrupted search are not complete state-space counts.
 | `rustFixPinnedFloor` | Pass | All listed invariants | 1,037,362 |
 | `reachEarlyStampGc` | Fail (expected) | `NeverGcEarlyStampWithReader` | 7,970 |
 | `reachEarlyStampGcAfterFailure` | Fail (expected) | `NeverGcEarlyStampAfterFailure` | 144,369 |
+
+## Mode B
+
+Mode B is the default. The flag `experimental_mvcc_passive_checkpoint` is off.
+The row spec models it with `Mode = "blocking"`. Code lines are turso main
+2827d0cc1. `mod.rs` is `core/mvcc/database/mod.rs`. `ck.rs` is
+`core/mvcc/database/checkpoint.rs`.
+
+### The design
+
+Each MVCC transaction holds `blocking_checkpoint_lock` in read mode for its
+whole life. The checkpoint takes the lock in write mode at `AcquireLock`
+(ck.rs:2437-2441). Both sides are try locks, so a checkpoint fails with `Busy`
+while a transaction is open. A B checkpoint that succeeds writes every
+committed change, truncates the whole logical log, restarts the WAL and then
+runs GC. So a successful B checkpoint is one atomic step with no MVCC
+transaction open. The GC then empties the version store.
+
+A few paths pin a WAL read mark with no gate and no MVCC transaction. Only the
+two schema reparse paths (`maybe_reparse_schema`, core/connection.rs:1413, and
+`force_reparse_schema`, core/connection.rs:1469) keep the pin while their
+`SELECT` begins an MVCC transaction. The raw WAL API does not open the window.
+`wal_insert_begin` (core/connection.rs:2529) also takes the WAL write lock, so
+a checkpoint fails before its publish. `wal_get_frame` (core/connection.rs:2500)
+pins only inside its call and runs no SQL. A reparse pin makes the
+checkpoint fail with `Busy` at `CheckpointWal`, after the publish of
+`durable_txid_max` (ck.rs:2108-2110 and ck.rs:3238-3243).
+
+How a B reader reads a row. A reader reads the chain, and in one case it skips
+the chain and reads the B-tree (`chain_is_write_buffer_for`, mod.rs:6047-6076).
+The chain must be one current version. The version began before the reader.
+Its begin is at or below `durable_txid_max`. Its stamp is not `ORIGIN` and is
+at or below the reader mark. An empty chain also reads the B-tree.
+
+The B GC rules (`gc_version_chain`, mod.rs:8625-8685):
+
+- Rule 2, B form, drops a superseded version that ended below `lwm`, except
+  when `e > ckpt_max` and (`in_btree` or no current version) (mod.rs:8648-8665).
+  The rule has no stamp test.
+- Rule 3 drops the last current version when `lwm` is `MAX`, the version has
+  a stamp at or below the floor, and `b <= ckpt_max` (mod.rs:8673-8683).
+
+Three callers run these rules: `gc_incremental` (mod.rs:8247), `GcTableRows`
+(ck.rs:2172) and the `Finalize` sweep (ck.rs:3452-3456).
+
+### The stamp after the WAL restart (gap 14)
+
+In B the WAL checkpoint restarts the WAL inside `CheckpointWal`
+(wal.rs:5249-5258), before the stamp. The stamp is `pager.wal_pos()` in
+`GcTableRows` (ck.rs:2179). Its value is `(checkpoint_seq + 1, 0)`, because
+`restart_wal_header` adds 1 to the sequence and sets the frame to 0
+(wal.rs:6106-6119). It equals `ORIGIN` only after 2^32 restarts of this WAL file (the sequence
+is read from the WAL header at open, core/storage/sqlite3_ondisk.rs:1812).
+A Rust probe on turso main printed the WAL position after each of three
+checkpoints: `(3, 0)`, `(4, 0)` and `(5, 0)`. It also printed
+`rows_versions = 0` after each one
+(`probe_mode_b_stamp_after_restart` in `harness/repro/mode-b-pager-pin.patch`).
+The stamp is that position by code reading (ck.rs:2179). The probe does not
+print the stamp itself. Verdict: no leak path at real sizes. The
+variant `blockingStampOrigin` shows the harm of the what-if.
+
+### The model
+
+- `CheckpointBlocking` is one action. Its guard: no writer in flight, no
+  registered reader, no pinned reader, GC idle. It writes every change since
+  the boundary as one WAL frame `F`. It publishes `durable`, backfills every
+  frame, empties the logical log and stamps the written versions with `F`.
+  Then it applies the B rules to every chain with `lwm = Inf`.
+- `CheckpointBlockingFail` is a pass that stops after its publish. It writes
+  the frame and publishes `durable`. It does not backfill, truncate, stamp or
+  collect garbage. A pinned reader with no gate (`PagerPinsWithoutGate`) or an
+  I/O error (`CheckpointFailures`) causes it.
+- `CheckpointBlockingStop` runs only with `BlockingStopsAfterStamp`. It
+  stops a pass after the stamp and before the GC. Whether the engine stops
+  there is not verified.
+- If `Mode == "blocking"`, `Gc` and the reads use the B rules, and the
+  fall-through read of `chain_is_write_buffer_for`.
+
+The WAL restart needs no new variable. Frame numbers count across restarts, as
+`RowDriver::counted_frame` does (`harness/mbt_tests/rows.rs`). The restart
+position `(seq + 1, 0)` counts to the number of frame `F`, so the spec stamps
+`F`, as in mode P.
+
+Constants of mode B. All "off" values give the passive model, state for state.
+
+| Constant | Code today | Meaning |
+|---|---|---|
+| `PagerPinsWithoutGate` | false in the main module | A pinned reader holds a WAL mark but not the gate |
+| `GuardB2KeepUncheckpointed` | true | Rule 2 B keeps `e > ckpt_max && (...)` |
+| `GuardB2InBtree` | true | The `in_btree` term of that clause |
+| `GuardB2Tombstone` | true | The `not(has_current)` term of that clause |
+| `GuardB3InCkptMax` | true | Rule 3 needs `b <= ckpt_max` |
+| `GuardFallThroughCkptMax` | true | The fall-through needs `b <= durable` |
+| `GuardFallThroughMark` | true | The fall-through needs a stamp at or below the mark |
+| `BlockingStampOrigin` | false | What-if: the B stamp writes `ORIGIN` |
+| `FixB2WaitsForPinned` | false | A fix that keeps GC alive in the model: Rule 2 B drops nothing while a pinned read mark is below the WAL max frame. Not in the engine and not tried in Rust |
+| `BlockingFailTruncatesLog` | false | What-if: a failed pass also empties the logical log (control for `RecoveryCorrect`) |
+| `BlockingStopsAfterStamp` | false | A pass stops after its stamp |
+
+Invariants: `ReadsCorrect`, `RecoveryCorrect`, `TypeOK`, `BackfillBelowReaders`
+and `BlockingStoreEmpty` (a successful B pass leaves no version in the store).
+
+### Results
+
+Every run used 1 key, 2 readers, 5 timestamps and 2 checkpoints, with
+`make variants SPECS=MvccPassiveCheckpoint` on a Mac with 4 TLC workers
+(2026-11-17). The state counts of a failing run
+are the states found before the first error. The state counts of the B modules
+include the flag `gcDroppedB` that `NeverGcDropsB` reads.
+
+| Module | Result | States | Seconds | Prediction |
+|---|---|---:|---:|---|
+| `blockingMain` | No error | 563,686 | 61 | Right |
+| `blockingNoB2Keep` | `ReadsCorrect` fails | 13,683 | 43 | Right |
+| `blockingNoB2InBtree` | `ReadsCorrect` fails. `RecoveryCorrect` holds | 87,133 | 40 | Wrong, see below |
+| `blockingNoB2Tombstone` | No error | 662,548 | 48 | Right |
+| `blockingNoB3CkptMax` | No error. Vacuous | 563,686 | 46 | Right |
+| `blockingNoFallThroughMark` | No error. Vacuous | 563,686 | 49 | Right |
+| `blockingNoFallThroughMarkPinned` | `ReadsCorrect` fails | 936 | 39 | Right |
+| `blockingNoFallThroughCkptMax` | No error. Vacuous | 563,686 | 52 | Right |
+| `blockingStampOrigin` | `BlockingStoreEmpty` fails | 77 | 40 | Right |
+| `blockingFailAfterPublish` | `BlockingStoreEmpty` fails | 334 | 43 | Right |
+| `blockingFailTruncatesLog` | `RecoveryCorrect` fails | 219 | 41 | No prediction |
+| `blockingPagerPin` | `ReadsCorrect` fails | 48,470 | 40 | Right |
+| `blockingPagerPinFixed` | No error | 2,009,967 | 100 | Right |
+| `blockingMainNoFallThrough` | No error | 563,686 | 48 | Right |
+| `reachBlockingFallThrough` | `NeverFallsThrough` fails | 1,855 | 42 | Right |
+| `reachBlockingDropsSuperseded` | `NeverBlockingDropsSuperseded` fails | 1,082 | 43 | Right |
+| `reachBlockingDropsCurrent` | `NeverBlockingDropsCurrent` fails | 156 | 42 | Right |
+| `reachBlockingStamp` | `NeverStampAtRestart` fails | 130 | 41 | Right |
+| `reachBlockingFailsAfterPublish` | `NeverBlockingFailsAfterPublish` fails | 101 | 42 | Right |
+| `reachMainGcDrops` | `NeverGcDropsB` fails | 461 | 40 | No prediction |
+| `reachPinGcDrops` | `NeverGcDropsB` fails | 401 | 40 | No prediction |
+| `reachFixedGcDrops` | `NeverGcDropsB` fails | 400 | 41 | No prediction |
+
+What the results say:
+
+- `blockingMain` finds no error. The B rules with no pager pin keep every read
+  right. `blockingMainNoFallThrough` finds no error for `NeverFallsThrough`. So
+  the fall-through read never runs in `blockingMain`: a pass that succeeds
+  with no failed pass before it empties the store, and no stamped version is left. It runs only when a pass
+  stops after its stamp (`reachBlockingFallThrough`). This is a lead for
+  `SIMPLIFY.md`, not a reason to delete code. Whether the engine stops a pass
+  there is not verified.
+- `blockingNoB2Keep` is the negative control. GC drops a delete that no pass
+  wrote, and a reader reads the old B-tree row.
+- `blockingNoB2InBtree` fails `ReadsCorrect`, not `RecoveryCorrect`. The trace
+  is 16 steps. A reader begins at timestamp 3 and takes its first look at the
+  chain. The chain has the marker of a delete that ended at 2. A new INSERT
+  commits at 4, and GC drops the marker because 2 is below the `lwm` of 3. The
+  second look of the dual cursor finds only the version from 4, which the
+  reader does not see. So it reads the B-tree row that the delete removed. The
+  `in_btree` term keeps the marker until a checkpoint removes the B-tree row.
+  The prediction said `RecoveryCorrect` first. That was wrong, because the log
+  still replays the delete.
+- Three guard variants are vacuous: `blockingNoB3CkptMax`,
+  `blockingNoFallThroughMark` and `blockingNoFallThroughCkptMax`. They have the
+  same 563,686 states as `blockingMain`. The guarded path never decides a step
+  in `blockingMain`. The two `ckpt_max` terms (`GuardB3InCkptMax` and
+  `GuardFallThroughCkptMax`) are implied by the stamp in this model, because a
+  pass stamps only versions at or below its new `durable`. These results do not
+  show that a guard is safe to delete. `GuardFallThroughMark` is needed:
+  `blockingNoFallThroughMarkPinned` fails `ReadsCorrect`. That module also
+  sets `FixB2WaitsForPinned`, so that the wrong read of `blockingPagerPin`
+  does not hide the fall-through.
+- `blockingNoB2Tombstone` finds no error. This means "not shown needed at
+  these bounds". It does not mean that the guard is safe to delete.
+- `blockingStampOrigin` and `blockingFailAfterPublish` leave versions in the
+  store after a pass. They break `BlockingStoreEmpty`, which is a memory
+  check, not a read check. `ReadsCorrect` holds in `blockingStampOrigin` and
+  `ReadsCorrect` and `RecoveryCorrect` hold in `blockingFailAfterPublish`
+  (extra runs on 2026-11-17 with the invariant lists changed).
+- `blockingFailTruncatesLog` is the control for `RecoveryCorrect`. A failed
+  pass empties the logical log and its frame never lands, so the committed rows
+  are in no file. A first version of the what-if wrote the frame and emptied
+  the log. It found no error (1,495,149 states), because the frame already has
+  every change.
+- `blockingPagerPin` fails `ReadsCorrect` with the code of today. Section
+  "Pager pin" gives the trace and the probe.
+- `blockingPagerPinFixed` has `FixB2WaitsForPinned`: Rule 2 B drops nothing
+  while a pinned read mark is below the WAL max frame. It finds no error. The
+  fix keeps GC alive: `reachFixedGcDrops` fails `NeverGcDropsB`. That drop
+  happens with no pin, so it does not show a drop after a failed pass. An earlier fix
+  (`FixB2NeedsStamp`, Rule 2 B needs a stamp) was rejected. It stopped every
+  Rule 2 B drop, because a version has a stamp only inside a pass, so its
+  "no error" came from a GC that never ran. The cost of
+  `FixB2WaitsForPinned`: while a stale pin exists, Rule 2 drops nothing. The fix
+  is in the model only. It is not in the engine and not tried in Rust.
+  An engine form of the fix must count every pager reader, also a reader on
+  read slot 0. `min_pinned_read_frame()` reads only slots 1 to 4
+  (wal.rs:916-927 on main 2827d0cc1). A reader that pins on a fully backfilled
+  WAL takes slot 0 (wal.rs:1059-1065), and the reader of the probe is that
+  case. So a fix that uses only that function still drops the delete. This is
+  by code reading.
+  `BlockingStoreEmpty` is not listed, because versions stay unstamped after a
+  failed pass.
+
+### Pager pin
+
+`blockingPagerPin` is a 17-step trace (`harness/mbt_tests/traces/MvccPassiveCheckpoint-blockingPagerPin.itf.json`).
+Reader `r1` pins a WAL mark. A writer inserts a row. A pass publishes frame 1
+and fails, because a pinned reader holds a mark. A second reader pins mark 1.
+A writer deletes the row. A second pass publishes frame 2 and fails. GC drops
+the delete, because it ended at 2 and `durable` is 2. The second reader
+begins its MVCC transaction, adopts mark 1 and reads the B-tree at mark 1,
+which still has the row.
+
+The Rust probe `probe_mode_b_pager_pin_after_failed_publish` shows the same
+shape on turso main 2827d0cc1 (3 of 3 runs, and once more at the time of this
+work). It inserts a row, runs `PRAGMA wal_checkpoint(TRUNCATE)`, pins a mark
+with `pager.begin_read_tx()`, deletes the row, and runs the checkpoint again.
+That checkpoint returns `Busy` after the publish. `gc_incremental` drops the
+delete, and the reader then reads the deleted row. The control without the GC
+reads no row. `FINDINGS.md` row 24 gives the verdict. The probe pins the mark
+with a direct call. A trigger through a public API is not shown.
+
+The replay of the bug trace on the engine at the pinned rev 0c9fe0dd9 fails
+at step 16 with `WrongRead`. Step 16 is the first read of the new reader
+(`blocking_pager_pin_trace_shows_wrong_read` in `harness/mbt_tests/rows.rs`).
+
+### What mode B leaves out
+
+- Index rows in B (`GcIndexRows` and the index chain rules).
+- An I/O error after the WAL restart (`SyncDbFile`, `TruncateLogicalLog`,
+  `FsyncLogicalLog` or `TruncateWal`). That leaves the WAL backfilled and
+  restarted, the log kept, and no stamp. The model has one failure point, the
+  one after the publish.
+- A partial backfill in a failed pass. With a reader on read mark 1 to 4, the
+  WAL checkpoint may backfill up to the reader mark before `begin_restart`
+  returns `Busy` (wal.rs:1239-1248). `CheckpointBlockingFail` backfills
+  nothing.
+- A run on the engine of a failed pass that an I/O error causes. The replay
+  runs only failed passes that a pager pin causes (`rows-blocking-pin-171`,
+  `rows-blocking-fail-then-pass-220`). There the chain check matches the
+  versions that the next successful pass leaves.
+- A writer in flight in the `lwm` of the checked B modules. They have
+  `WriterBeginTicks = false`, so their GC can drop more than the engine. That
+  is the safe side for `ReadsCorrect`. A reachability result can rely on such
+  a drop (not verified).
+- Root bindings and `is_btree_readable_at`. The one table exists before the
+  first pass.
+- The real reparse window. The pinned reader of the model stands for it.
+- The partial GC of `GcTableRows` batches with yields. The pass is one step.
+- A crash inside a B pass. The recovery spec covers the file steps.
+- Attached databases, VACUUM and `checkpoint_in_progress` (always false in B).
+- The empty slot unlink and the writer retry in `insert_version`.

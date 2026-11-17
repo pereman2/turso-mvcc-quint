@@ -128,8 +128,8 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   refusals. The first one checks only files with WAL frames.
 - `NoLeak`: after a checkpoint succeeds, no chain is left whose every version
   has its last event at or below the snapshot. GC runs with no open snapshot
-  in the model, so the B-tree holds that row. After a blocking checkpoint, the
-  store is empty.
+  in the model, so the B-tree holds that row. After a blocking checkpoint with no
+  failed pass before it, the store is empty (`DESIGN-rows.md`, "Mode B").
 
 ## Results
 

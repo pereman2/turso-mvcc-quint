@@ -83,7 +83,16 @@ A reader with `begin_ts = b` and `read_mark = m` reads row `k` like this.
 3. Otherwise read `k` from the B-tree at read mark `m`.
 
 In passive mode the reader never skips the chain in favor of the B-tree
-(`btree_covers_chain_for_snapshot` returns `false`). The dual cursor
+(`btree_covers_chain_for_snapshot` returns `false`, mod.rs:6093-6111 on turso
+main 2827d0cc1).
+
+Mode B (the flag off) has one more rule. A reader skips the chain and reads the
+B-tree when the chain is one current version that began before the reader,
+began at or below `durable_txid_max`, and has a stamp at or below the read
+mark (`chain_is_write_buffer_for`, mod.rs:6047-6076). The row spec models it as
+`FallThrough`. TLC shows that it never runs in `blockingMain`, because a pass
+that succeeds empties the version store. `DESIGN-rows.md`, section "Mode B",
+gives the runs. The dual cursor
 (`MvccLazyCursor`) has a version store side and a B-tree side. The two sides
 look at the chain at different moments.
 
@@ -136,8 +145,8 @@ any moment. It checks these properties in every reachable state.
 TLC checks a bounded model, not every possible size. The main configuration
 (module `main` in `MvccPassiveCheckpointConfigs.qnt`) has one key, two
 readers, five clock timestamps and two checkpoint passes. `make check` explores
-16,786,385 distinct states in about 10 minutes on 3 workers and finds no
-error. Most variants use the same size.
+17,344,980 distinct states and finds no error (run
+`MvccPassiveCheckpoint-main`, 454 seconds on 4 workers, 2026-11-17). Most variants use the same size.
 
 TLC visits each order of the keys and the readers. For this reason the main
 configuration has one key. The model was also checked with two keys, two

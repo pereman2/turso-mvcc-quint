@@ -42,8 +42,9 @@ There are six specs in this folder.
   configuration checks the invariants `ReadsCorrect`, `RecoveryCorrect`,
   `BackfillBelowReaders` and `BackfillFloorBelowReaders`. The dirty-key
   variants also check `CollectsEveryChange`. The main configuration has 1 key,
-  2 readers, 5 timestamps and 2 checkpoints. TLC explores 16,786,385 states in
-  10 minutes on 3 workers.
+  2 readers, 5 timestamps and 2 checkpoints. TLC explores 17,344,980 states in
+  454 seconds on 4 workers. The module `blockingMain` is mode B, the default
+  (the flag off), with 563,686 states (`DESIGN-rows.md`, section "Mode B").
 - Schema (`MvccPassiveSchema.qnt`): table ids, root bindings,
   `sqlite_schema`, the schema cookie, page allocation, DDL, publish and
   recovery. The main configuration has 2 tables, pages 2 and 3, 1 reader, 4
@@ -76,10 +77,10 @@ open reader, checkpoint passes that stop before they complete, and mode T.
 
 ### What is not modeled
 
-- Mode B, the default (flag off), with readers. This covers Rule 2 B form, Rule 3 with
-  `b <= ckpt_max` and the B-tree fall-through read. The "blocking" mode of
-  the sequence spec uses the passive GC rules. `MODEL-GAPS.md` says that this
-  is false for the flag off.
+- Mode B index rows, root bindings and a crash inside a B pass. The row spec
+  models mode B with readers (Rule 2 B form, Rule 3 with `b <= ckpt_max` and
+  the B-tree fall-through read). The "blocking" mode of the sequence spec
+  still uses the passive GC rules, which is false for the flag off.
 - Mode T (flag on plus `PRAGMA wal_checkpoint(TRUNCATE)`) is only partly
   modeled. WAL restart and the blocking final GC sweep are not in the specs.
 - Index rows in modes B and T, index DDL, unique indexes and more than one
@@ -91,7 +92,8 @@ open reader, checkpoint passes that stop before they complete, and mode T.
   is one atomic step. `MvccGroupCommit.qnt` models it alone, with no
   checkpoint and no readers.
 - Real cursor scans. The model reads one key in one step.
-- WAL restart and TRUNCATE, and `backfill_floor` across them.
+- The WAL restart of mode T and `backfill_floor` across it. The row spec
+  models the B restart inside the atomic B pass, in counted frames.
 - `cleanup_dropped_commit` on the non-group path. `MvccGroupCommit.qnt`
   models it on the group path.
 - The statement retry loop.
@@ -205,7 +207,7 @@ These times are for 3 TLC workers.
 
 | Run | Distinct states | Time |
 |-----|-----------------|------|
-| `make check`, row spec (`MvccPassiveCheckpoint`) | 16,786,385 | 10 minutes |
+| `make check`, row spec (`MvccPassiveCheckpoint`) | 17,344,980 | 454 seconds on 4 workers |
 | `make check`, sequence spec (`MvccPassiveSequence`) | 4,008,777 | 3.5 minutes |
 | Largest row variant that ran in full (`dirtyKeys`) | 45,359,101 | 26 minutes |
 | Other row and sequence variants | up to 20,771,050 | up to 13 minutes |
@@ -227,6 +229,9 @@ The test in `harness/mbt_tests/` replays a trace against the Rust code with
 these two fields. `docs/HARNESS.md` describes that test. For a
 spec with a module named `mbt`, `make traces` uses that module, which takes
 only the steps that the engine can take.
+
+For the mode B traces, run `make traces SPECS=MvccPassiveCheckpoint MBT=mbtBlocking`. `make check` and
+`make variants` skip every module whose name starts with `mbt`.
 
 `make bug-traces` runs the simulator on each variant that must fail, until it
 finds the violation, and writes that trace to `traces/bugs/<Spec>-<module>.itf.json`.
