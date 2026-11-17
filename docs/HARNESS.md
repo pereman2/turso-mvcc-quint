@@ -229,7 +229,9 @@ with `Expect::Conforms`.
 with the spec oracle (`CatalogRead`). `GcCatalog` runs `gc_chain_now` on the
 `sqlite_schema` row of the table with the floors of `gc_incremental`. `Gc`
 does the same on the row of the table, and refuses the trace when
-`rootpage_gc_protected` holds. After every step, the driver checks that the
+`rootpage_gc_protected` holds. `GcSample`, `GcApply` and `GcApplyCatalog`
+do the same in steps: the driver samples the lwm and the floor at `GcSample`
+and uses them at each apply step. After every step, the driver checks that the
 chain of each `sqlite_schema` row is empty exactly when the spec says that
 GC dropped it (`GcKept`, `GcDropped`). This also covers the GC that the
 engine runs at the end of a checkpoint pass. A spec reader that pinned a
@@ -274,6 +276,15 @@ over-approximates the empty pass. The committed trace has a pass that writes
 a frame. To find such a trace, check `CookieNotBehind or ck.frame == 0`
 instead of `CookieNotBehind`.
 
+## Traces of the mode T, owner and GC-in-steps variants
+
+| Trace | Engine result |
+|---|---|
+| `reachBeginMidPublish`, `ownerCatalog` | Refused: the driver has no mode T publish steps and no checkpoint on a reader's connection |
+| `reachGcWithPinned` | Refused at the `GcApply` step: `rootpage_gc_protected` holds in the engine |
+| `reachGcAfterBegin` | Not replayed to the `GcApply` step. The traces that `quint run` found stop first at the existing `GcDropped` hole at `CheckpointFinish` or at the refusal of a frame between a pin and a begin. So this run does not show that the engine rechecks the lwm |
+| 200 random `gcSample` and `gcSampleCatalog` traces | Most conform. The rest fail with `CookieBehind` (#11499) or `RecoveryRows` (#11502), or `GcDropped` at `CheckpointFinish`, or are refused. Random traces of the old spec `main` fail the same ways |
+
 ## Limits
 
 - The schema driver supports DDL CREATE and DROP, row writes, the
@@ -284,6 +295,11 @@ instead of `CookieNotBehind`.
   with `FixInnerTxChecks` on.
   So it does not replay the main configuration of the schema spec, or the bug
   traces that need table reads (`issue11501`, `issue11500`).
+- The driver refuses the mode T publish steps (`CheckpointPublishRoots`,
+  `CheckpointPublishHeader`, `CheckpointPublishSchema`,
+  `CheckpointPublishGen`), a checkpoint on a reader's connection
+  (`ck.owner`), `InnerCommitCheckpoint` and `GcIndexPhase`. The `Checkpointer`
+  runs only passive passes, and the engine runs the mode T window in one call.
 - The sequence spec has no driver yet (`setvalRace`).
 - The engine picks page numbers and table ids itself. The schema driver
   compares what recovery sees, not the numbers.

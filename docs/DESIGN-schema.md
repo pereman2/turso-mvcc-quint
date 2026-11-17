@@ -545,6 +545,135 @@ because a dual-cursor scan can lose a row when the chain empties during the
 scan (mod.rs:8623-8628). So this result is not evidence that the guard can
 go.
 
+## Mode T publish, the checkpoint owner and GC in steps
+
+Three constants add paths that the main configuration leaves out. Main keeps
+`Mode = "passive"` and `GcSamplesFirst = false`. It sets
+`CheckpointOwnerReaders = true` with `FixRefuseCheckpointOwner = true`, so the
+owner pick never passes its guard. Main stays at 21,177,855 distinct states.
+The Rust lines below are at the pinned rev `0c9fe0dd94c1`. `csm.rs` is
+`core/mvcc/database/checkpoint_state_machine.rs`.
+
+### Mode T publish
+
+`Mode` is `"passive"` or `"truncateFlagOn"` (`PRAGMA wal_checkpoint(TRUNCATE)`
+with the passive flag on). In passive mode the publish is one step, because
+`apply_passive_publish_window_ordered` runs the whole window in the clock
+callback, and `begin_tx` takes the same clock (csm.rs:2208-2228,
+mod.rs:6760). In mode T the code calls `apply_checkpoint_publish_window`
+with no clock lock (csm.rs:3321-3324), so a `begin_tx` can run between its
+parts. The model splits it into four steps
+(`MvccPassiveSchema.qnt:1077-1146`):
+
+| Action | Code | What it does |
+|---|---|---|
+| `CheckpointPublishRoots` | csm.rs:2169-2190 | Retire, remove and alloc the root map operations, and make the new bindings readable |
+| `CheckpointPublishHeader` | csm.rs:2194-2199 | Replace the header cookie |
+| `CheckpointPublishSchema` | csm.rs:2021-2136 | Patch the `sqlite_schema` payload and the shared schema |
+| `CheckpointPublishGen` | csm.rs:2137-2147 | Bump `schema_generation` |
+
+The code returns before the generation bump when the schema has nothing to
+publish (csm.rs:2065-2070), so the model goes to `published` directly then.
+The `checkpoint_publish_in_progress` bit does not hold back a begin: only
+`try_begin_passive_publish_window` reads it (mod.rs:7957-7968). The
+`PublishPending` value covers `committed`, `roots` and `header`, and
+`PagesAccounted` and `SchemaRowCurrent` use it, because the root map and the
+shared schema differ between those steps by design.
+
+The TRUNCATE backfill needs every read lock free. `checkpoint_wal` passes
+Busy up in this mode (csm.rs:3386-3405). So `CheckpointBackfill` needs no
+pinned reader and no DDL mark, and `CheckpointFail("published")` is enabled
+on Busy even with `CheckpointFailures` off. WAL restart and the final
+blocking GC sweep (csm.rs:3532-3535) are not modeled.
+
+Results (4 workers, `MaxTs = 4`):
+
+| Configuration | Expect | Result |
+|---|---|---|
+| `truncateFlagOn` | No error | No error, 28,866,833 distinct states |
+| `reachBeginMidPublish` | `NeverBeginsMidPublish` fails | Fails, 9,569 distinct states |
+| `truncateNoRefreshRoot` | `OpenCorrect` fails | Fails, 31,630 distinct states |
+
+A reader that compiled before the schema step meets a negative root of a
+table that this pass created. `GuardRefreshRoot` maps it through the binding,
+and the materialized check hides the page from a mark below the frame. A
+reader with the positive root of a destroyed table is stopped by the cookie
+check. So the missing clock wrapper costs only a spurious `SchemaUpdated` at
+these bounds. Without `GuardRefreshRoot`, `OpenCorrect` fails
+(`truncateNoRefreshRoot`). The model merges R1 to R4 and S1 with S2. A
+split between R1 and R2 is not verified. The model keeps `Alters` off in mode
+T.
+
+### The checkpoint owner
+
+An explicit checkpoint (`Connection::checkpoint`) can run on the connection of
+a reader between two statements of its transaction
+(`begin_explicit_checkpoint` refuses only an active statement,
+connection.rs:2590). A `nextval` inner commit starts the auto-checkpoint on
+the reader's connection while the outer snapshot stays in `txs`
+(execute.rs:14384-14420, mod.rs:3698-3721). The pager commit then ends the
+connection's WAL read lock, which is the owner's pin (pager.rs:3474-3475).
+The MVCC snapshot of the owner stays in `txs`, so `compute_lwm` and the
+reader mark still count it.
+
+The model keeps these two apart. `RdState.unpinned` says that the pager
+commit ended the pin, and `Pinned` excludes such a reader. `Registered` does
+not change. `CkState.owner` is picked in `CheckpointStart`, and
+`InnerCommitCheckpoint` starts a passive pass with `auto = true`. The owner
+runs nothing while its pass runs. `FinishCatalog` uses the marks of `Pinned`
+and `Registered`, as `gc_floor_reader_mark` does (csm.rs:2237-2250).
+
+`CheckpointOwnerReaders` turns the owner path on. `FixRefuseCheckpointOwner`
+refuses a pass on the connection of a pinned or registered reader. The main
+configuration has both on, so it has no owner path.
+
+| Configuration | Expect | Result |
+|---|---|---|
+| `ownerCatalog` | `CatalogReadsCorrect` fails | Fails, 502,406 distinct states |
+| `reachAutoCheckpointOwner` | `NeverAutoCheckpointOnReader` fails | Fails, 4,463 distinct states |
+| `ownerRows` | No error | No error, 2,621,152 distinct states (`MaxCheckpoints = 1`) |
+
+`ownerCatalog` is the shape of #8093. A DDL creates `t1`, `r1` pins mark 0
+and begins, a DDL creates `t2`, a checkpoint on `r1` writes frame 1 and ends
+the pin, the backfill copies frame 1 into the database file, and `r1` scans
+`sqlite_schema` at mark 0. The scan returns `t2`. Table reads cannot show
+this bug in this spec. A frame is a full image, so a reader at mark 0 never
+passes `materialized_at <= mark`. The row spec has per-key frames and shows
+the read (`rustFixOwner`). The mark that the owner uses for its next
+statement is not modeled. A Rust reproduction is not verified.
+
+### GC in steps
+
+`GcSamplesFirst` splits a `gc_incremental` call (mod.rs:8244-8404) into
+`GcSample`, any number of `GcApply` and `GcApplyCatalog`, `GcIndexPhase` and
+`GcEnd` (`MvccPassiveSchema.qnt:1405-1448`). `GcSample` takes the lwm and the
+floor before any chain lock. `gc_chain_now` computes a sampled `MAX` again
+(mod.rs:8162-8166). `GuardGcRechecksIdleLwm` models this: with it off, a
+sampled idle lwm stays. The chain budget needs no state, because a call that
+visits fewer chains is the same as a budget that stops early.
+
+A table row is inserted once and never changes in this spec, so Rules 1 and
+2 find nothing in a row chain, and `GcApply` applies Rule 3. Rule 2 applies
+to the `sqlite_schema` chain of a dropped table (`GcApplyCatalog`).
+
+| Configuration | Expect | Result |
+|---|---|---|
+| `gcSample` | No error | No error, 25,762,650 distinct states (`MaxCheckpoints = 1`) |
+| `gcSampleNoRecheck` | No error | No error, 25,782,306 distinct states (`MaxCheckpoints = 1`) |
+| `gcSampleCatalog` | No error | No error, 33,540,732 distinct states (`MaxCheckpoints = 1`) |
+| `gcSampleNoCatalogFloor` | `CatalogReadsCorrect` fails | Fails, 234,424 distinct states |
+| `reachGcWithPinned` | `NeverGcWithPinned` fails | Fails, 757,073 distinct states |
+| `reachGcAfterBegin` | `NeverGcAfterBegin` fails | Fails, 1,303,879 distinct states |
+
+With two checkpoint passes, `gcSample` ran over 40 minutes on 4 workers and
+was stopped, so these configurations use one pass. The main configuration
+keeps `GcSamplesFirst = false` for the same reason. `gcSampleNoRecheck`
+passes: a reader that begins after the sample has a mark at or above the
+sampled floor and a begin above the one insert of the row, so the B-tree gives
+it the row. The row spec fails there because its rows have updates and a dual
+cursor that looks twice. This does not show that the recheck is unneeded. The
+row has one insert only.
+
 ## Not modeled
 
 - `index_id_to_index` keyed by a binding other than the index's own (S18).
@@ -572,9 +701,10 @@ go.
   `DROP` in one window, and the engine chain matches the spec there.
 - Writes through a stale root page. The model checks the read side of #11500.
 - The retry loop of `Statement` (the second bug of #11499).
-- Readers that see the publish window half applied. The model applies the
-  window in one step. In the code an active reader reads the bindings without
-  the clock lock.
+- Readers that see the publish window half applied in mode P. The model
+  applies the window in one step there, as the code does under the clock lock.
+  Mode T splits it (see "Mode T publish, the checkpoint owner and GC in
+  steps").
 - Readers without a WAL mark, and the `STAGED` mark.
 - Logical log truncation, aborts, VACUUM, and schema rows without a B-tree
   (views, triggers, sequences).
@@ -585,23 +715,23 @@ go.
 ## A pager commit that never publishes
 
 `CheckpointCommit` and `CheckpointPublish` stay separate
-(`MvccPassiveSchema.qnt:796` and `MvccPassiveSchema.qnt:874`).
+(`MvccPassiveSchema.qnt:956` and `MvccPassiveSchema.qnt:1050`).
 The code finishes the pager commit at
 `core/mvcc/database/checkpoint_state_machine.rs:3333`.
 It can yield before publish at line 3341 of that file.
 
 `CheckpointFail` can stop collection or any later modeled phase
-(`MvccPassiveSchema.qnt:961`). It keeps committed images and clears staged root operations.
+(`MvccPassiveSchema.qnt:1283`). It keeps committed images and clears staged root operations.
 This matches `cleanup_after_external_io_error` at
 `core/mvcc/database/checkpoint_state_machine.rs:1079`.
 The code clears those operations at line 1087 of that file.
 A separate `CheckpointTruncateLog` action represents the phase before
-`CheckpointFinish` (`MvccPassiveSchema.qnt:933` and `MvccPassiveSchema.qnt:943`).
+`CheckpointFinish` (`MvccPassiveSchema.qnt:1210` and `MvccPassiveSchema.qnt:1255`).
 It models a failure point, not logical log contents.
 The corresponding code phases start at
 `core/mvcc/database/checkpoint_state_machine.rs:3377` and line 3544 of that file.
 
-`NoLeakedPages` checks every committed frame (`MvccPassiveSchema.qnt:1200`).
+`NoLeakedPages` checks every committed frame (`MvccPassiveSchema.qnt:1722`).
 Each allocated page must appear in that frame's catalog or be free.
 It does not use the in-memory root bindings as a substitute for the catalog.
 A new table's first pager commit can be intact when its publish fails.
@@ -611,32 +741,32 @@ The next frame then has two allocated pages and only one catalog root.
 The model uses one root page per object. It does not model page contents.
 
 `FixPublishFailedCommit` saves the committed operations separately before
-cleanup discards the staged operations (`MvccPassiveSchema.qnt:961`).
+cleanup discards the staged operations (`MvccPassiveSchema.qnt:1283`).
 `CheckpointStart` refuses another pass while this publish is pending
-(`MvccPassiveSchema.qnt:605`). `CheckpointResumePublish` restores the pending publish
-(`MvccPassiveSchema.qnt:978`). Publish completes before any new pass allocates roots.
+(`MvccPassiveSchema.qnt:762`). `CheckpointResumePublish` restores the pending publish
+(`MvccPassiveSchema.qnt:1300`). Publish completes before any new pass allocates roots.
 This is a proposed model fix. Its Rust implementation is not verified.
 `PagesAccounted` allows this pending publish, as it allows a normal committed
-pass that is waiting to publish (`MvccPassiveSchema.qnt:1204`).
+pass that is waiting to publish (`MvccPassiveSchema.qnt:1726`).
 `NoLeakedPages` has no such exception.
 
 `NeverFailsBeforePublish` requires an allocated root in a nonempty committed
-frame and a failure at `committed` (`MvccPassiveSchema.qnt:1229`).
+frame and a failure at `committed` (`MvccPassiveSchema.qnt:1751`).
 `NeverRepairsRoots` requires that failure and a later resumed publish
-(`MvccPassiveSchema.qnt:1230`). A no-op checkpoint cannot satisfy either witness.
+(`MvccPassiveSchema.qnt:1752`). A no-op checkpoint cannot satisfy either witness.
 
 ## Publish from cleanup in the Rust fix
 
 This section uses the read-only Rust fix at `633aeb51a`, in a local worktree
 that is not published.
 `FixStampAtPagerCommit` stamps written row chains in `CheckpointCommit`
-(`MvccPassiveSchema.qnt:796`). The Rust call is at
+(`MvccPassiveSchema.qnt:956`). The Rust call is at
 `core/mvcc/database/checkpoint_state_machine.rs:3301`.
 The stamp helper starts at
 `core/mvcc/database/checkpoint_state_machine.rs:3568`.
 
 `FixCleanupPublishes` calls `ApplyCheckpointPublish` from the failure action
-(`MvccPassiveSchema.qnt:961` and `MvccPassiveSchema.qnt:879`).
+(`MvccPassiveSchema.qnt:1283` and `MvccPassiveSchema.qnt:1147`).
 It publishes committed root operations before it clears the staged operations.
 This models the cleanup window at
 `core/mvcc/database/checkpoint_state_machine.rs:1040`.
@@ -647,9 +777,10 @@ The earlier `FixPublishFailedCommit` remains a separate proposed repair.
 It uses one object, two pages, one reader, three timestamps, and two passes.
 `reachCleanupPublish` uses those bounds and requires an allocation in a
 committed frame, a failure at `committed`, and the actual cleanup publish
-(`MvccPassiveSchema.qnt:1227`).
-The schema model does not represent a checkpoint on its reader's connection.
-That path is not verified here. The row and sequence models check it.
+(`MvccPassiveSchema.qnt:1749`).
+The schema model has the checkpoint owner path since `CheckpointOwnerReaders`.
+The main configuration turns it off with `FixRefuseCheckpointOwner`. See "Mode
+T publish, the checkpoint owner and GC in steps".
 
 ## Checkpoint-stop results
 
