@@ -50,13 +50,16 @@ all: check variants
 # The main configuration of each spec. The TLC backend must find no error.
 check: KIND = main
 # Every other configuration. Each one must give the result in its comment.
+# Quint copies the whole spec into the verifier input once for each module of
+# the file. The input of a file with 65 modules is too long for Node. So each
+# run verifies a file that holds only its own module.
 # Quint reports a violation of the combined invariant q_inv, not by name. So
 # each run checks only the invariants of its comment, and a variant that must
 # fail lists only that one invariant. A violation then names it.
 variants: KIND = variants
 
 check variants:
-	@set -e; trap 'rm -rf $(STATES) _apalache-out' EXIT; \
+	@set -e; trap 'rm -rf $(STATES) _apalache-out .slice-*.qnt' EXIT; \
 	mkdir -p $(TMPDIR); echo '{"workers": $(WORKERS)}' > $(STATES)/tlc.json; \
 	for spec in $(SPECS); do \
 	  main=$(MAIN); \
@@ -66,11 +69,13 @@ check variants:
 	    case "$$mod" in mbt*) continue;; esac; \
 	    if [ -n "$(ONLY)" ] && ! echo " $(ONLY) " | grep -q " $$mod "; then continue; fi; \
 	    name=$$spec-$$mod; start=$$(date +%s); \
-	    out=$$($(QUINT) verify $${spec}Configs.qnt --main $$mod --init Init --step Next \
+	    awk -v m="$$mod" '$$1 == "module" && $$2 == m { p = 1 } p { print } p && /^}/ { exit }' \
+	      $${spec}Configs.qnt > .slice-$$spec-$$mod.qnt; \
+	    out=$$($(QUINT) verify .slice-$$spec-$$mod.qnt --main $$mod --init Init --step Next \
 	      --invariants $$invs --backend tlc --tlc-config $(STATES)/tlc.json \
 	      --server-endpoint $(SERVER) \
 	      --verbosity 3 < /dev/null 2>&1 || true); \
-	    rm -rf $(TMPDIR)/* _apalache-out; \
+	    rm -rf $(TMPDIR)/* _apalache-out .slice-$$spec-$$mod.qnt; \
 	    secs=$$(( $$(date +%s) - start )); \
 	    states=$$(echo "$$out" | grep -o '[0-9,]* distinct states found' | tail -1 | cut -d' ' -f1); \
 	    if echo "$$out" | grep -q '^\[ok\] No violation found'; then got=""; \

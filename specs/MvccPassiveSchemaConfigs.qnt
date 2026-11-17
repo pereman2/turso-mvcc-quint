@@ -2862,7 +2862,8 @@ module ownerCatalog {
 
 // Expect no error: the owner path with table reads only. A frame is a full
 // image, and a reader at mark 0 never passes the materialized_at gate, so a
-// lost pin changes no table read in this spec.
+// lost pin changes no table read in this spec. MaxCheckpoints = 1, to stay
+// under 40 minutes on 4 workers.
 // Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
 module ownerRows {
   import MvccPassiveSchema(
@@ -2874,7 +2875,7 @@ module ownerRows {
     FixStampAtPagerCommit = false,
     FixCleanupPublishes = false,
     CheckpointFailures = false,
-    MaxCheckpoints = 2,
+    MaxCheckpoints = 1,
     Indexes = Set(),
     IdxTable = "t1",
     Alters = false,
@@ -2963,7 +2964,8 @@ module reachAutoCheckpointOwner {
 }
 
 // Expect no error: GC samples lwm and the floor before the chain lock and
-// computes lwm again when the sample was MAX.
+// computes lwm again when the sample was MAX. MaxCheckpoints = 1: with 2 the
+// TLC search ran over 40 minutes on 4 workers and was stopped.
 // Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
 module gcSample {
   import MvccPassiveSchema(
@@ -2975,7 +2977,7 @@ module gcSample {
     FixStampAtPagerCommit = false,
     FixCleanupPublishes = false,
     CheckpointFailures = false,
-    MaxCheckpoints = 2,
+    MaxCheckpoints = 1,
     Indexes = Set(),
     IdxTable = "t1",
     Alters = false,
@@ -3013,6 +3015,8 @@ module gcSample {
 }
 
 // Expect no error: the catalog configuration with GC in steps.
+// MaxCheckpoints = 1: with 2 the TLC search ran over 40 minutes on 4 workers
+// and was stopped.
 // Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages CatalogReadsCorrect CatalogNoTwoGenerations
 module gcSampleCatalog {
   import MvccPassiveSchema(
@@ -3024,7 +3028,7 @@ module gcSampleCatalog {
     FixStampAtPagerCommit = false,
     FixCleanupPublishes = false,
     CheckpointFailures = false,
-    MaxCheckpoints = 2,
+    MaxCheckpoints = 1,
     Indexes = Set(),
     IdxTable = "t1",
     Alters = false,
@@ -3064,6 +3068,7 @@ module gcSampleCatalog {
 // Expect no error: GC keeps a sampled lwm of MAX. A reader that begins
 // after the sample has a mark at or above the sampled floor and a begin
 // above the one insert of the row, so the B-tree gives it the row.
+// MaxCheckpoints = 1, as gcSample.
 // Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
 module gcSampleNoRecheck {
   import MvccPassiveSchema(
@@ -3075,7 +3080,7 @@ module gcSampleNoRecheck {
     FixStampAtPagerCommit = false,
     FixCleanupPublishes = false,
     CheckpointFailures = false,
-    MaxCheckpoints = 2,
+    MaxCheckpoints = 1,
     Indexes = Set(),
     IdxTable = "t1",
     Alters = false,
