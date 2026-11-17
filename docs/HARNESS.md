@@ -3,7 +3,7 @@
 This file describes a test that replays Quint traces on the engine. A trace is
 a list of spec actions with the state after each one. The test runs the same
 actions on a real database and compares the state after each step.
-`make traces` and `make bug-traces` write the traces (see README.md).
+`make traces` and `make bug-traces` write the traces (see `specs/README.md`).
 
 The test can show two things:
 
@@ -20,11 +20,18 @@ evidence for the paths of the model only. PR #11779 builds this test.
 
 ## Where the test lives
 
-The test is a `#[cfg(test)]` module in `core/mvcc/database/mbt_tests/`. Only
-a module inside `turso_core` can read the private `MvStore` fields, the
-`pub(crate)` yield point enums and `CheckpointStateMachine::state_for_test()`.
-The `cargo nextest run --workspace --all-features` job runs the module, so CI
-needs no new job. Quint runs only offline, from this Makefile.
+In turso, the test is a `#[cfg(test)]` module in
+`core/mvcc/database/mbt_tests/`. Only a module inside `turso_core` can read the
+private `MvStore` fields, the `pub(crate)` yield point enums and
+`CheckpointStateMachine::state_for_test()`. The test also needs test-only hooks
+in `checkpoint_state_machine.rs` that set the collect threshold and read the
+collected rows. Turso does not have these hooks yet.
+
+This repo keeps the module in `harness/mbt_tests/`.
+`harness/run-in-turso.sh` copies it into a turso checkout at the pinned rev,
+applies `harness/turso-hooks.patch` there, and runs it. The patch adds the
+hooks and the `mod mbt_tests` line in `core/mvcc/database/tests.rs`. Quint runs
+only offline, from `specs/Makefile`.
 
 | File | Content |
 |---|---|
@@ -34,17 +41,17 @@ needs no new job. Quint runs only offline, from this Makefile.
 | `mbt_tests/schema.rs` | The actions of `MvccPassiveSchema` that the bug traces use |
 | `mbt_tests/traces/*.itf.json` | The committed traces |
 
-To run it:
+To run it from the root of this repo:
 
 ```bash
-cargo test -p turso_core --lib mbt_tests
+harness/run-in-turso.sh
 ```
 
 To replay a folder of new row traces from `make traces`:
 
 ```bash
-MBT_TRACES=$PWD/quint/mvcc-passive-checkpoint/traces \
-  cargo test -p turso_core --lib mbt_tests::rows::row_traces_from_folder -- --ignored --nocapture
+MBT_TRACES=$PWD/specs/traces harness/run-in-turso.sh -- \
+  mbt_tests::rows::row_traces_from_folder -- --ignored --nocapture
 ```
 
 ## How a step maps to the engine

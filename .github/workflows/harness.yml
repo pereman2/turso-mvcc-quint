@@ -1,0 +1,44 @@
+# The trace replay harness. `crate` builds harness/ against the pinned
+# turso_core and runs its tests. `replay` runs the trace replay inside a turso
+# checkout at the same rev, with harness/turso-hooks.patch applied.
+name: Harness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+  pull_request:
+    paths:
+      - "harness/**"
+      - ".github/workflows/harness.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  crate:
+    name: Build and test the harness crate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test without the engine
+        run: cargo test --locked
+      - name: Test with the pinned turso_core
+        run: cargo test --locked --features engine
+
+  replay:
+    name: Replay the traces in turso
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the trace replay
+        run: harness/run-in-turso.sh

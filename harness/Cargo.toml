@@ -1,0 +1,21 @@
+[package]
+name = "turso-mvcc-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Trace replay harness for the turso MVCC Quint specs"
+license = "MIT"
+
+[features]
+# Builds turso_core at the pinned rev and runs a smoke test of the MVCC
+# passive checkpoint through its public API.
+engine = ["dep:turso_core", "dep:turso_sqlite"]
+
+[dependencies]
+serde_json = "1"
+# run-in-turso.sh reads this rev. Keep the two revs equal.
+turso_core = { git = "https://github.com/tursodatabase/turso", rev = "0c9fe0dd94c14a4f00106bffa9c9433d5965fd3a", optional = true }
+turso_sqlite = { git = "https://github.com/tursodatabase/turso", rev = "0c9fe0dd94c14a4f00106bffa9c9433d5965fd3a", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
