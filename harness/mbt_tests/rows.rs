@@ -32,11 +32,11 @@ struct Reader {
 }
 
 pub(super) struct RowDriver {
-    db: MvccTestDbNoConn,
+    pub(super) db: MvccTestDbNoConn,
     io: Arc<dyn IO>,
-    mv: Arc<Store>,
-    table_id: MVTableId,
-    ck: Checkpointer,
+    pub(super) mv: Arc<Store>,
+    pub(super) table_id: MVTableId,
+    pub(super) ck: Checkpointer,
     free_writers: Vec<(Arc<Connection>, Arc<StopAt>)>,
     /// Writers between WritePrepare and WriteFinish, by spec commit timestamp.
     writers: HashMap<i64, Writer>,
@@ -90,11 +90,17 @@ impl Driver for RowDriver {
 
 impl RowDriver {
     pub(super) fn new() -> Self {
+        Self::with_schema(&["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"])
+    }
+
+    /// A driver for table `t` of `schema`, which must have an integer
+    /// primary key `k` and an integer column `v`.
+    pub(super) fn with_schema(schema: &[&str]) -> Self {
         let db = MvccTestDbNoConn::new_with_random_db_passive();
         let setup = db.connect();
-        setup
-            .execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)")
-            .unwrap();
+        for sql in schema {
+            setup.execute(sql).unwrap();
+        }
         setup
             .execute("PRAGMA mvcc_checkpoint_threshold = -1")
             .unwrap();
@@ -141,11 +147,6 @@ impl RowDriver {
         let is_delete = step.pick("isDelete").bool();
         let ts = step.var("clock").int();
         let old = latest_in(step.var("writes"), key, ts);
-        let (conn, stop) = self
-            .free_writers
-            .pop()
-            .unwrap_or_else(|| connect_with_stop(&self.db));
-        conn.execute("BEGIN CONCURRENT").unwrap();
         let sql = if is_delete {
             format!("DELETE FROM t WHERE k = {key}")
         } else if old != 0 {
@@ -153,7 +154,19 @@ impl RowDriver {
         } else {
             format!("INSERT INTO t VALUES ({key}, {ts})")
         };
-        conn.execute(&sql).unwrap();
+        self.prepare_commit(&sql, ts);
+        Ok(())
+    }
+
+    /// Runs `sql` in a `BEGIN CONCURRENT` transaction and steps its `COMMIT`
+    /// until it has taken its commit timestamp. `ts` is the spec timestamp.
+    pub(super) fn prepare_commit(&mut self, sql: &str, ts: i64) {
+        let (conn, stop) = self
+            .free_writers
+            .pop()
+            .unwrap_or_else(|| connect_with_stop(&self.db));
+        conn.execute("BEGIN CONCURRENT").unwrap();
+        conn.execute(sql).unwrap();
         let tx_id = conn.get_mv_tx_id().unwrap();
         stop.set(
             CommitYieldPoint::CommitValidation.point(),
@@ -179,10 +192,9 @@ impl RowDriver {
                 logged: false,
             },
         );
-        Ok(())
     }
 
-    fn write_log_append(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn write_log_append(&mut self, step: &Step) -> StepOutcome {
         let ts = step.pick("i").field("ts").int();
         assert!(
             !self.writers.values().any(|w| w.logged),
@@ -202,7 +214,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn write_finish(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn write_finish(&mut self, step: &Step) -> StepOutcome {
         let ts = step.pick("i").field("ts").int();
         let mut writer = self.writers.remove(&ts).unwrap();
         writer.stop.clear();
@@ -215,7 +227,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn reader_pin(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn reader_pin(&mut self, step: &Step) -> StepOutcome {
         let name = step.pick("r").str().to_string();
         let mark = step.var("rd").get_str(&name).field("mark").int();
         let db = &self.db;
@@ -240,7 +252,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn reader_begin(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn reader_begin(&mut self, step: &Step) -> StepOutcome {
         let reader = self.readers.get_mut(step.pick("r").str()).unwrap();
         let ReaderState::Pinned = reader.state else {
             panic!("ReaderBegin of a reader that is not pinned");
@@ -286,7 +298,17 @@ impl RowDriver {
         Ok(())
     }
 
-    fn reader_end(&mut self, step: &Step) -> StepOutcome {
+    /// The connection of reader `name` while its transaction is open.
+    pub(super) fn reader_conn(&self, name: &str) -> &Arc<Connection> {
+        let reader = &self.readers[name];
+        assert!(
+            matches!(reader.state, ReaderState::Active { .. }),
+            "reader {name} has no open transaction"
+        );
+        &reader.conn
+    }
+
+    pub(super) fn reader_end(&mut self, step: &Step) -> StepOutcome {
         let reader = self.readers.get_mut(step.pick("r").str()).unwrap();
         if let ReaderState::Active { .. } = reader.state {
             reader.conn.execute("ROLLBACK").unwrap();
@@ -299,7 +321,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn checkpoint_start(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn checkpoint_start(&mut self, step: &Step) -> StepOutcome {
         self.ck.start(1);
         let spec_snap = step.var("ck").field("snap").int();
         let snap = self.ck.sm().snapshot_ts_for_test();
@@ -433,7 +455,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn checkpoint_commit(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn checkpoint_commit(&mut self, step: &Step) -> StepOutcome {
         let spec_wrote = step.var("ck").field("frame").int() != 0;
         let wrote = self.ck.commit();
         if wrote != spec_wrote {
@@ -449,7 +471,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn checkpoint_backfill(&mut self, _step: &Step) -> StepOutcome {
+    pub(super) fn checkpoint_backfill(&mut self, _step: &Step) -> StepOutcome {
         self.ck
             .step_until(|state| state == CheckpointState::TruncateLogicalLog);
         Ok(())
@@ -475,7 +497,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn check(&mut self, step: &Step) -> StepOutcome {
+    pub(super) fn check(&mut self, step: &Step) -> StepOutcome {
         let spec_durable = step.var("durable").int();
         let durable = self.mv.durable_txid_max.load(Ordering::SeqCst);
         if let Some(commit) = self.commit_on_other_side(spec_durable, durable) {
