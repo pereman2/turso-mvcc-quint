@@ -21,6 +21,9 @@ module main {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -38,13 +41,15 @@ module main {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -65,6 +70,9 @@ module alter {
     IdxTable = "t1",
     Alters = true,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -82,13 +90,15 @@ module alter {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -110,6 +120,9 @@ module codeToday {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -127,13 +140,15 @@ module codeToday {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = false,
     FixPersistIds = false,
     FixHeaderCookieMax = false,
     FixInnerTxChecks = false,
     FixDdlRebases = false,
     FixAlterPatch = false,
-    FixAlterRecovery = false
+    FixAlterRecovery = false,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -154,6 +169,9 @@ module indexes {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -171,13 +189,15 @@ module indexes {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -199,6 +219,9 @@ module issue11499 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -216,13 +239,15 @@ module issue11499 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = false,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -245,6 +270,9 @@ module issue11500 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -262,13 +290,15 @@ module issue11500 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = false,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -290,6 +320,9 @@ module issue11501 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -307,13 +340,15 @@ module issue11501 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = false,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -336,6 +371,9 @@ module issue11502 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -353,13 +391,15 @@ module issue11502 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = false,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -381,6 +421,9 @@ module issue7960 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -398,13 +441,15 @@ module issue7960 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = false,
     FixPersistIds = false,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -426,6 +471,9 @@ module issue8004 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -443,13 +491,15 @@ module issue8004 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = false,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -471,6 +521,9 @@ module issue8077Row {
     IdxTable = "t1",
     Alters = true,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -488,13 +541,15 @@ module issue8077Row {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = false,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -517,6 +572,9 @@ module issue8077 {
     IdxTable = "t1",
     Alters = true,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -534,13 +592,15 @@ module issue8077 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = false,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -562,6 +622,9 @@ module issue8537 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -579,13 +642,15 @@ module issue8537 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -607,6 +672,9 @@ module noAllocRetiresStale {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -624,13 +692,15 @@ module noAllocRetiresStale {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -652,6 +722,9 @@ module noAlterRecovery {
     IdxTable = "t1",
     Alters = true,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -669,13 +742,15 @@ module noAlterRecovery {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = false
+    FixAlterRecovery = false,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -697,6 +772,9 @@ module noBindingGcLwm {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -714,13 +792,15 @@ module noBindingGcLwm {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -742,6 +822,9 @@ module noBusy {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -759,13 +842,15 @@ module noBusy {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -787,6 +872,9 @@ module noCookieCheck {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -804,13 +892,15 @@ module noCookieCheck {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -832,6 +922,9 @@ module noCoversBegin {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = false,
     GuardCoversEnd = true,
@@ -849,13 +942,15 @@ module noCoversBegin {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -877,6 +972,9 @@ module noCoversEnd {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = false,
@@ -894,13 +992,15 @@ module noCoversEnd {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -922,6 +1022,9 @@ module noEndedCreated {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -939,13 +1042,15 @@ module noEndedCreated {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -967,6 +1072,9 @@ module noFreedOnly {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -984,13 +1092,15 @@ module noFreedOnly {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1012,6 +1122,9 @@ module noFrozenMark {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1029,13 +1142,15 @@ module noFrozenMark {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = false,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1057,6 +1172,9 @@ module noGenerationGate {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1074,13 +1192,15 @@ module noGenerationGate {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1101,6 +1221,9 @@ module noMatCheck {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = false,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1118,13 +1241,15 @@ module noMatCheck {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1146,6 +1271,9 @@ module noOpenFallback {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1163,13 +1291,15 @@ module noOpenFallback {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1191,6 +1321,9 @@ module noPatchKeepsEnd {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1208,13 +1341,15 @@ module noPatchKeepsEnd {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1236,6 +1371,9 @@ module noRetire {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1253,13 +1391,15 @@ module noRetire {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1280,6 +1420,9 @@ module reachBusy {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1297,13 +1440,15 @@ module reachBusy {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1325,6 +1470,9 @@ module reachOldOwner {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1342,13 +1490,15 @@ module reachOldOwner {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1371,6 +1521,9 @@ module reachOwnedNegative {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1388,13 +1541,15 @@ module reachOwnedNegative {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = false,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1416,6 +1571,9 @@ module reachReplaysRow {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1433,13 +1591,15 @@ module reachReplaysRow {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1461,6 +1621,9 @@ module reachReuse {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1478,13 +1641,15 @@ module reachReuse {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1506,6 +1671,9 @@ module reachSchemaUpdatedCookie {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1523,13 +1691,15 @@ module reachSchemaUpdatedCookie {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1551,6 +1721,9 @@ module reachSchemaUpdatedGen {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1568,13 +1741,15 @@ module reachSchemaUpdatedGen {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1596,6 +1771,9 @@ module reachRootGuardFires {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1613,13 +1791,15 @@ module reachRootGuardFires {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1640,6 +1820,9 @@ module failedCommit {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1657,13 +1840,15 @@ module failedCommit {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1684,6 +1869,9 @@ module failedCommitFixed {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1701,13 +1889,15 @@ module failedCommitFixed {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1728,6 +1918,9 @@ module reachFailedCommit {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1745,13 +1938,15 @@ module reachFailedCommit {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1772,6 +1967,9 @@ module reachRepairedRoots {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1789,13 +1987,15 @@ module reachRepairedRoots {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1816,6 +2016,9 @@ module rustFix {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1833,13 +2036,15 @@ module rustFix {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1860,6 +2065,9 @@ module reachCleanupPublish {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1877,13 +2085,15 @@ module reachCleanupPublish {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1905,6 +2115,9 @@ module catalog {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1922,13 +2135,15 @@ module catalog {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1950,6 +2165,9 @@ module issue8093 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -1967,13 +2185,15 @@ module issue8093 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = false,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -1996,6 +2216,9 @@ module issue8094 {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2013,13 +2236,15 @@ module issue8094 {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = false,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2042,6 +2267,9 @@ module noCatalogGcFloor {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2059,13 +2287,15 @@ module noCatalogGcFloor {
     GuardCatalogGcFloor = false,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2091,6 +2321,9 @@ module noCatalogGcLwm {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2108,13 +2341,15 @@ module noCatalogGcLwm {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = false,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2136,6 +2371,9 @@ module reachCatalogNewer {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2153,13 +2391,15 @@ module reachCatalogNewer {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2182,6 +2422,9 @@ module reachCatalogGenerations {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2199,13 +2442,15 @@ module reachCatalogGenerations {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2227,6 +2472,9 @@ module reachCatalogFromBtree {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2244,13 +2492,15 @@ module reachCatalogFromBtree {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2276,6 +2526,9 @@ module noCatalogGcFloorOnly {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2293,13 +2546,15 @@ module noCatalogGcFloorOnly {
     GuardCatalogGcFloor = false,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2321,6 +2576,9 @@ module reachCatalogGcDropped {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2338,13 +2596,15 @@ module reachCatalogGcDropped {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }
 
@@ -2366,6 +2626,9 @@ module reachCatalogTomb {
     IdxTable = "t1",
     Alters = false,
     CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
     GuardMatCheck = true,
     GuardCoversBegin = true,
     GuardCoversEnd = true,
@@ -2383,12 +2646,618 @@ module reachCatalogTomb {
     GuardCatalogGcFloor = true,
     GuardCatalogGcLwm = true,
     GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
     FixDisjointIds = true,
     FixPersistIds = true,
     FixHeaderCookieMax = true,
     FixInnerTxChecks = true,
     FixDdlRebases = true,
     FixAlterPatch = true,
-    FixAlterRecovery = true
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect no error: mode T. The publish runs in four steps without the
+// clock lock, so a reader can prepare, begin, open and read between them.
+// Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
+module truncateFlagOn {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "truncateFlagOn",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect NeverBeginsMidPublish to fail: in mode T a reader begins after the
+// root map is published and before the schema generation moves.
+// Invariants: NeverBeginsMidPublish
+module reachBeginMidPublish {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "truncateFlagOn",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect OpenCorrect to fail: mode T with GuardRefreshRoot off, the
+// negative control of truncateFlagOn at the same bounds (#8537).
+// Invariants: OpenCorrect
+module truncateNoRefreshRoot {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "truncateFlagOn",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = false,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect CatalogReadsCorrect to fail: a checkpoint runs on the connection of
+// an open reader at mark 0. The pager commit ends the reader's pin, the
+// backfill passes its mark, and its scan of sqlite_schema reads the new
+// database file.
+// Invariants: CatalogReadsCorrect
+module ownerCatalog {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = false
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect no error: the owner path with table reads only. A frame is a full
+// image, and a reader at mark 0 never passes the materialized_at gate, so a
+// lost pin changes no table read in this spec.
+// Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
+module ownerRows {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = false
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect NeverAutoCheckpointOnReader to fail: an inner commit starts the
+// auto-checkpoint on a reader's connection, and it commits a frame while the
+// reader is pinned and in txs.
+// Invariants: NeverAutoCheckpointOnReader
+module reachAutoCheckpointOwner {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = false,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = false
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect no error: GC samples lwm and the floor before the chain lock and
+// computes lwm again when the sample was MAX.
+// Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
+module gcSample {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect no error: the catalog configuration with GC in steps.
+// Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages CatalogReadsCorrect CatalogNoTwoGenerations
+module gcSampleCatalog {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect no error: GC keeps a sampled lwm of MAX. A reader that begins
+// after the sample has a mark at or above the sampled floor and a begin
+// above the one insert of the row, so the B-tree gives it the row.
+// Invariants: TypeOK ReadsCorrect OpenCorrect NoSharedOwner RecoveryCorrect PagesAccounted CookieNotBehind KindsMatch NoLiveDestroy SchemaRowCurrent StampsAtOrAfterBinding GcNeverRunsUnderNewerBinding NoLeakedPages
+module gcSampleNoRecheck {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = false,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect CatalogReadsCorrect to fail: GC in steps with
+// GuardCatalogGcFloor off, the negative control of gcSampleCatalog.
+// Invariants: CatalogReadsCorrect
+module gcSampleNoCatalogFloor {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 3,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = true,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = false,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = false,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect NeverGcWithPinned to fail: GC drops a chain while a reader has
+// pinned a WAL mark and is not in txs yet.
+// Invariants: NeverGcWithPinned
+module reachGcWithPinned {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = true,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
+  ).* from "./MvccPassiveSchema"
+}
+
+// Expect NeverGcAfterBegin to fail: with a sampled lwm of MAX kept, GC drops
+// a chain after a reader began between the sample and the drop.
+// Invariants: NeverGcAfterBegin
+module reachGcAfterBegin {
+  import MvccPassiveSchema(
+    Objs = Set("t1", "t2"),
+    Pages = Set(2, 3),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixPublishFailedCommit = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    Indexes = Set(),
+    IdxTable = "t1",
+    Alters = false,
+    CatalogReads = false,
+    Mode = "passive",
+    CheckpointOwnerReaders = true,
+    GcSamplesFirst = true,
+    GuardMatCheck = true,
+    GuardCoversBegin = true,
+    GuardCoversEnd = true,
+    GuardRetireOnDestroy = true,
+    GuardBindingGcLwm = true,
+    GuardAllocRetiresStale = true,
+    GuardOpenFallback = true,
+    GuardBusyOnUnpublished = true,
+    GuardGenerationGate = true,
+    GuardCookieCheck = true,
+    GuardPatchKeepsEnd = true,
+    GuardEndedCreated = true,
+    GuardFreedOnly = true,
+    GuardRefreshRoot = true,
+    GuardCatalogGcFloor = true,
+    GuardCatalogGcLwm = true,
+    GuardFrozenMark = true,
+    GuardGcRechecksIdleLwm = false,
+    FixDisjointIds = true,
+    FixPersistIds = true,
+    FixHeaderCookieMax = true,
+    FixInnerTxChecks = true,
+    FixDdlRebases = true,
+    FixAlterPatch = true,
+    FixAlterRecovery = true,
+    FixRefuseCheckpointOwner = true
   ).* from "./MvccPassiveSchema"
 }

@@ -55,10 +55,20 @@
  *            whole chain of a row in one step. A scan is one atomic step.
  *            The catalog configurations keep Alters off.
  *
+ *   Mode     "truncateFlagOn": each explicit pass is a TRUNCATE checkpoint
+ *            with the passive flag on. Its publish runs in four steps that
+ *            other actors can interleave (CheckpointPublishRoots).
+ *   CheckpointOwnerReaders  a checkpoint can run on the connection of an
+ *            open reader: an explicit one between statements, or the
+ *            auto-checkpoint of a nextval inner commit (InnerCommitCheckpoint).
+ *   GcSamplesFirst  a GC call samples lwm and the floor, then drops chains
+ *            in later steps (GcSample, GcApply, GcApplyCatalog, GcEnd).
+ *
  * Not modeled: row updates and deletes, more than one ALTER per table,
- * writes through a stale root page other than a read, readers that see
- * the publish window half applied, readers without a WAL mark, logical log
- * truncation, aborts, VACUUM and multi-page B-trees.
+ * writes through a stale root page other than a read, readers without a WAL
+ * mark, logical log truncation, aborts, VACUUM, multi-page B-trees, WAL
+ * restart and the final blocking GC sweep of mode T, and a prepare inside
+ * the passive publish window (begin_tx rechecks the generation there).
  *
  * Notes on the Quint code:
  *   - Objs and Readers are strings. The model checker sees every order of
@@ -90,6 +100,11 @@ module MvccPassiveSchema {
   const IdxTable: str           // The table that the indexes belong to.
   const Alters: bool            // true: ALTER TABLE ADD COLUMN is possible.
   const CatalogReads: bool      // true: readers scan sqlite_schema, and GC drops its versions.
+  const Mode: str               // "passive", or "truncateFlagOn": every explicit pass is
+                                // PRAGMA wal_checkpoint(TRUNCATE) with the passive flag on.
+                                // The auto-checkpoint is passive in both (mod.rs:3700-3708).
+  const CheckpointOwnerReaders: bool // a checkpoint can run on the connection of an open reader
+  const GcSamplesFirst: bool    // GC samples lwm and the floor, then applies the rules per chain
 
   // Special cases of the code today. true in the main configuration.
   const GuardMatCheck: bool          // is_btree_readable_at: materialized_at <= read_mark
@@ -110,6 +125,7 @@ module MvccPassiveSchema {
   const GuardCatalogGcLwm: bool      // GC of a sqlite_schema version: Rule 2 e <= lwm, Rule 3 idle
   const GuardFrozenMark: bool        // every statement of a transaction reads pages at the
                                      // WAL mark that its begin pinned
+  const GuardGcRechecksIdleLwm: bool // gc_chain_now computes lwm again when the sample was MAX
 
   // Fixes for open issues. false is the code today.
   const FixDisjointIds: bool     // temporary ids never equal -P for a page P (#11501)
@@ -123,6 +139,7 @@ module MvccPassiveSchema {
                                  // carries the temporary id, and only a DROP ends the root (#8077)
   const FixAlterRecovery: bool   // recovery maps the temporary id of a replayed schema row
                                  // update to the table's page (needs FixPersistIds)
+  const FixRefuseCheckpointOwner: bool // a checkpoint refuses a connection with an open snapshot
 
   pure val Inf = 1000   // "no end timestamp", "no reader"
   pure val None = -1    // "no visible version"
@@ -159,15 +176,20 @@ module MvccPassiveSchema {
   type CkState = { pc: str, snap: int, old: int, todo: Set[str], img: int -> Cell,
                    bcat: str -> int, ops: Set[Op], created: Set[str], written: Set[str],
                    freed: Set[int], dirty: bool, frame: int, hdr: int, cv2: Set[str],
-                   pending: Set[Op], history: Set[str] }
+                   pending: Set[Op], history: Set[str], owner: str, auto: bool }
   // mark: the WAL mark that begin pinned (the gate of is_btree_readable_at).
   // pm: the WAL mark that page reads use. It equals mark with GuardFrozenMark.
+  // unpinned: a checkpoint on this reader's connection ended its WAL read
+  // lock (pager.rs:3474-3475). Its MVCC snapshot stays in txs.
   type RdState = { pc: str, o: str, root: int, gen: int, cookie: int, mark: int, pm: int,
-                   b: int, tid: str }
+                   b: int, tid: str, unpinned: bool }
   type LogRec = { o: str, kind: str, ts: int, root: int }
   type ErrRec = { kind: str, reader: str, o: str, b: int, tid: str, mark: int, got: int,
                   want: int, btree: str, snap: int }
   type CkVerRec = { skip: bool, b: int, e: int, root: int, v: int }
+  // The sample of one gc_incremental call. at: the clock at the sample.
+  // idle: compute_lwm was MAX. floor: compute_min_reader_mark().min(backfill_floor).
+  type GcState = { pc: str, at: int, lwm: int, idle: bool, floor: int }
 
   var clock: int                 // Last timestamp taken from the logical clock.
   var lastCommitted: int         // last_committed_tx_ts.
@@ -197,6 +219,7 @@ module MvccPassiveSchema {
   var ddlLog: Set[LogRec]        // History: finished DDL commits (in the logical log).
   var seen: Set[str]             // History: outcomes that the reachability checks look for.
   var err: Set[ErrRec]           // History: wrong reads and panics.
+  var gcs: GcState               // The GC sample when GC runs in steps (GcSamplesFirst).
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -244,7 +267,9 @@ module MvccPassiveSchema {
 
   pure def FreePages(img: int -> Cell): Set[int] = Pages.filter(p => img.get(p).own == NoObj)
 
-  val Pinned: Set[str] = Readers.filter(r => Set("pinned", "active", "open").contains(rd.get(r).pc))
+  val Pinned: Set[str] = Readers.filter(r => and {
+    Set("pinned", "active", "open").contains(rd.get(r).pc), not(rd.get(r).unpinned),
+  })
   val Registered: Set[str] = Readers.filter(r => Set("active", "open").contains(rd.get(r).pc))
 
   val Lwm: int = if (Registered == Set()) Inf else Min(Registered.map(r => rd.get(r).b))
@@ -256,14 +281,16 @@ module MvccPassiveSchema {
   pure val IdleCk: CkState = {
     pc: "idle", snap: 0, old: 0, todo: Set(), img: EmptyImg.img, bcat: EmptyImg.bcat,
     ops: Set(), created: Set(), written: Set(), freed: Set(), dirty: false, frame: 0,
-    hdr: 0, cv2: Set(), pending: Set(), history: Set(),
+    hdr: 0, cv2: Set(), pending: Set(), history: Set(), owner: "", auto: false,
   }
 
   pure val IdleDdl: Ddl = { pc: "none", o: "none", kind: "none", ts: 0, hdr: 0,
                             sch: Objs.mapBy(o => 0), dr: Set(), mark: 0 }
 
   pure val IdleRd: RdState = { pc: "idle", o: "none", root: 0, gen: 0, cookie: 0, mark: 0,
-                               pm: 0, b: 0, tid: "none" }
+                               pm: 0, b: 0, tid: "none", unpinned: false }
+
+  pure val IdleGc: GcState = { pc: "idle", at: 0, lwm: 0, idle: false, floor: 0 }
 
   pure def KindOf(o: str): str = if (Indexes.contains(o)) "index" else "table"
   pure def TableOf(o: str): str = if (Indexes.contains(o)) IdxTable else o
@@ -306,6 +333,7 @@ module MvccPassiveSchema {
     ddlLog' = Set(),
     seen' = Set(),
     err' = Set(),
+    gcs' = IdleGc,
   }
 
   // Keeps the schema variables as they are.
@@ -321,7 +349,7 @@ module MvccPassiveSchema {
   // Keeps the store variables as they are.
   action UnchangedStoreVars = all {
     bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
-    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk,
+    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, gcs' = gcs,
   }
 
   // ---------------------------------------------------------------------------
@@ -377,6 +405,7 @@ module MvccPassiveSchema {
             else scat,
     wal' = wal, nBackfill' = nBackfill, db' = db,
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
+    gcs' = gcs,
     seen' = if (CatalogReads and kind != "create" and scat.get(o).gone)
               seen.union(Set("CatalogTomb")) else seen,
     err' = err,
@@ -513,7 +542,8 @@ module MvccPassiveSchema {
       else all {
         clock' = clock + 1,
         rd' = rd.setBy(r, x => { ...x, pc: "active", b: clock + 1 }),
-        seen' = seen,
+        // Mode T: the begin runs between two parts of the publish.
+        seen' = if (MidPublish) seen.union(Set("BeginMidPublish")) else seen,
       },
       lastCommitted' = lastCommitted, UnchangedSchemaVars, UnchangedRowVars,
       UnchangedStoreVars, err' = err,
@@ -544,6 +574,7 @@ module MvccPassiveSchema {
   def NewPm(r: str): int = if (GuardFrozenMark) rd.get(r).pm else wal.length()
 
   action ReaderOpen(r: str): bool = all {
+    ck.owner != r or ck.pc == "idle",
     rd.get(r).pc == "active",
     if (rd.get(r).root < 0) all {
       rd' = rd.setBy(r, x => { ...x, pc: "open", pm: NewPm(r), tid: TidOwner(x.root) }),
@@ -586,6 +617,7 @@ module MvccPassiveSchema {
   // it. A page of another table, or a free page, is a wrong read. Seeking a
   // negative page is the pager panic of #8537.
   action ReaderRead(r: str): bool = all {
+    ck.owner != r or ck.pc == "idle",
     rd.get(r).pc == "open",
     {
       val o = rd.get(r).o
@@ -660,6 +692,7 @@ module MvccPassiveSchema {
   // B-tree (page 1) is always readable. The scan is one atomic step.
   action ReaderReadCatalog(r: str): bool = all {
     CatalogReads,
+    ck.owner != r or ck.pc == "idle",
     rd.get(r).pc == "active",
     {
       val b = rd.get(r).b
@@ -696,6 +729,7 @@ module MvccPassiveSchema {
   }
 
   action ReaderEnd(r: str): bool = all {
+    ck.owner != r or ck.pc == "idle",
     Set("prepared", "pinned", "active", "open").contains(rd.get(r).pc),
     rd' = rd.set(r, IdleRd),
     UnchangedForReaders, seen' = seen, err' = err,
@@ -709,19 +743,29 @@ module MvccPassiveSchema {
 
   action UnchangedForCheckpoint = all {
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars,
-    UnchangedRowVars, rd' = rd, seen' = seen,
+    UnchangedRowVars, rd' = rd, seen' = seen, gcs' = gcs,
   }
 
-  action CheckpointStart: bool = all {
-    ck.pc == "idle",
-    ck.pending == Set(),
-    nCk < MaxCheckpoints,
-    ck' = { ...IdleCk, pc: "collect", snap: SnapshotTs, old: durable, todo: Objs,
-            img: LastImg.img, bcat: LastImg.bcat, history: ck.history },
-    nCk' = nCk + 1,
-    bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
-    backfillFloor' = backfillFloor,
-    UnchangedForCheckpoint, err' = err,
+  // An explicit checkpoint (Connection::checkpoint, PRAGMA wal_checkpoint)
+  // can run on the connection of a reader between two statements of its
+  // transaction. begin_explicit_checkpoint refuses only an active statement
+  // (connection.rs:2590). The owner then runs nothing until the pass stops.
+  action CheckpointStart: bool = {
+    nondet owner = (if (CheckpointOwnerReaders) Readers.filter(r => rd.get(r).pc == "active")
+                    else Set()).union(Set("")).oneOf()
+    all {
+      (FixRefuseCheckpointOwner and owner != "") implies
+        not(Pinned.union(Registered).contains(owner)),
+      ck.pc == "idle",
+      ck.pending == Set(),
+      nCk < MaxCheckpoints,
+      ck' = { ...IdleCk, pc: "collect", snap: SnapshotTs, old: durable, todo: Objs,
+              img: LastImg.img, bcat: LastImg.bcat, history: ck.history, owner: owner },
+      nCk' = nCk + 1,
+      bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+      backfillFloor' = backfillFloor,
+      UnchangedForCheckpoint, err' = err,
+    }
   }
 
   def InWindow(t: int): bool = t != 0 and t != Inf and Resolved(t) and ck.old < t and t <= ck.snap
@@ -903,24 +947,42 @@ module MvccPassiveSchema {
 
   // The pager commit also stages the page 1 header with the cookie of now
   // (CommitPagerTxn).
+  // BeginPagerTxn reuses the owner's WAL read lock (csm.rs:2653-2661). If the
+  // owner's snapshot is not the newest frame, begin_write_tx fails with
+  // BusySnapshot, and the pass stops before it owns a pager transaction. An
+  // auto-checkpoint drops that error (mod.rs:3755-3760). pager.commit_tx
+  // ends the connection's WAL read lock (pager.rs:3474-3475), which is the
+  // owner's pin. The owner's MVCC snapshot stays in txs.
   action CheckpointCommit: bool = {
     val boundary = Max(Set(ck.old, ck.snap))
     val write = ck.dirty or boundary > ck.old
+    val owned = ck.owner != "" and Pinned.contains(ck.owner)
+    val stale = write and owned and rd.get(ck.owner).mark != wal.length()
     all {
       ck.pc == "collect",
       ck.todo == Set(),
-      wal' = if (write) wal.append({ img: ck.img, bcat: ck.bcat, meta: boundary }) else wal,
-      ck' = { ...ck, pc: "committed", hdr: cookie,
-              frame: if (write) wal.length() + 1 else 0 },
+      if (stale) all {
+        wal' = wal,
+        ck' = { ...IdleCk, history: ck.history },
+        rd' = rd, chain' = chain, scat' = scat,
+      } else all {
+        wal' = if (write) wal.append({ img: ck.img, bcat: ck.bcat, meta: boundary }) else wal,
+        ck' = { ...ck, pc: "committed", hdr: cookie,
+                frame: if (write) wal.length() + 1 else 0,
+                history: if (ck.auto and write and owned and Registered.contains(ck.owner))
+                           ck.history.union(Set("autoOwnerCommit"))
+                         else ck.history },
+        rd' = if (write and owned) rd.setBy(ck.owner, x => { ...x, unpinned: true }) else rd,
+        chain' = if (FixStampAtPagerCommit and write) Objs.mapBy(o =>
+          if (ck.written.contains(o)) chain.get(o).map(v =>
+            if (v.b <= ck.snap) { ...v, mat: wal.length() + 1 } else v)
+          else chain.get(o)) else chain,
+        scat' = if (FixStampAtPagerCommit and write) StampCatalog(wal.length() + 1) else scat,
+      },
       bind' = bind, nBackfill' = nBackfill, db' = db, durable' = durable,
-      backfillFloor' = backfillFloor, nCk' = nCk,
+      backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars,
-      ins' = ins, rd' = rd, seen' = seen,
-      chain' = if (FixStampAtPagerCommit and write) Objs.mapBy(o =>
-        if (ck.written.contains(o)) chain.get(o).map(v =>
-          if (v.b <= ck.snap) { ...v, mat: wal.length() + 1 } else v)
-        else chain.get(o)) else chain,
-      scat' = if (FixStampAtPagerCommit and write) StampCatalog(wal.length() + 1) else scat,
+      ins' = ins, seen' = seen,
       err' = err,
     }
   }
@@ -982,9 +1044,104 @@ module MvccPassiveSchema {
                      r2: if (pr2) page else cat.get(o).r2 }
   }
 
+  // Passive: apply_passive_publish_window_ordered runs the whole window in
+  // the clock callback (csm.rs:2208-2228), and begin_tx takes the same clock
+  // (mod.rs:6760). So no begin falls inside the window.
   action CheckpointPublish: bool = all {
+    Mode == "passive",
     ck.pc == "committed",
     ApplyCheckpointPublish("published", false),
+  }
+
+  /* Mode T: the checkpoint calls apply_checkpoint_publish_window with no
+     clock wrapper (csm.rs:3321-3324). It took blocking_checkpoint_lock
+     before the pager commit (csm.rs:3246-3252), and begin_tx does not take
+     that lock with the passive flag on (mod.rs:6729). So a begin_tx, a
+     statement prepare or a DDL on another thread can run between the four
+     parts below. Each part takes its own lock.
+       CheckpointPublishRoots   root map ops, staged allocs made visible, and
+                                durable_txid_max (csm.rs:2169-2190). A STAGED
+                                binding is never readable (mod.rs:10695-10712),
+                                and GC keeps the chain until the stamp, so a read
+                                between the alloc and the visible mark answers
+                                as before the alloc. The model merges them.
+       CheckpointPublishHeader  the staged page 1 header (csm.rs:2194-2199).
+       CheckpointPublishSchema  the sqlite_schema payload patch (csm.rs:2029-2063)
+                                and Database::schema under its mutex
+                                (csm.rs:2075-2136). With Alters off and
+                                GuardPatchKeepsEnd on the patch changes no
+                                modeled variable, so the model merges them.
+       CheckpointPublishGen     schema_generation (csm.rs:2137-2147). */
+  val MidPublish: bool = Set("roots", "header", "schema").contains(ck.pc)
+
+  action CheckpointPublishRoots: bool = all {
+    Mode == "truncateFlagOn",
+    ck.pc == "committed",
+    bind' = AfterAlloc,
+    nextId' = BumpedId,
+    durable' = Max(Set(ck.old, ck.snap)),
+    ck' = { ...ck, pc: "roots", pending: Set(),
+            history: if (ck.pending != Set() and ck.history.contains("failedCommitted"))
+                       ck.history.union(Set("repairedRoots"))
+                     else ck.history },
+    clock' = clock, lastCommitted' = lastCommitted, cat' = cat, ddl' = ddl, cookie' = cookie,
+    pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots, tid' = tid,
+    ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill, db' = db,
+    backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs, rd' = rd, seen' = seen, err' = err,
+  }
+
+  action CheckpointPublishHeader: bool = all {
+    Mode == "truncateFlagOn",
+    ck.pc == "roots",
+    cookie' = if (FixHeaderCookieMax) Max(Set(cookie, ck.hdr)) else ck.hdr,
+    ck' = { ...ck, pc: "header" },
+    clock' = clock, lastCommitted' = lastCommitted, cat' = cat, ddl' = ddl,
+    pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots,
+    nextId' = nextId, tid' = tid, ddlLog' = ddlLog, UnchangedRowVars, bind' = bind,
+    wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs, rd' = rd, seen' = seen, err' = err,
+  }
+
+  // publish_checkpointed_schema_roots reads the bindings and the shared
+  // schema as they are now, not as they were at the pager commit.
+  action CheckpointPublishSchema: bool = {
+    val ended = ck.created.filter(x => Ended(x)).map(o => bind.get(o).root)
+    val owned = Objs.exists(o => pub.get(o) < 0 and bind.get(o).in and bind.get(o).root > 0)
+    val publish = ck.created != Set() or droppedRoots != Set() or owned
+    val dr1 = if (GuardFreedOnly) droppedRoots.exclude(ck.freed) else Set()
+    all {
+      Mode == "truncateFlagOn",
+      ck.pc == "header",
+      cat' = Objs.mapBy(o => {
+               val c1 = if (Alters and ck.created.contains(o)) PatchCat(o, bind.get(o).root)
+                        else cat.get(o)
+               if (not(GuardPatchKeepsEnd) and ck.created.contains(o)) { ...c1, d: Inf } else c1
+             }),
+      pub' = Objs.mapBy(o =>
+               if (pub.get(o) < 0 and bind.get(o).in and bind.get(o).root > 0) bind.get(o).root
+               else pub.get(o)),
+      droppedRoots' = if (not(publish)) droppedRoots
+                      else dr1.union(if (GuardEndedCreated) ended else Set()),
+      // With nothing to publish the code returns before the generation bump.
+      ck' = { ...ck, pc: if (publish) "schema" else "published" },
+      clock' = clock, lastCommitted' = lastCommitted, ddl' = ddl, cookie' = cookie,
+      pubCookie' = pubCookie, gen' = gen, nextId' = nextId, tid' = tid, ddlLog' = ddlLog,
+      UnchangedRowVars, bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db,
+      durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs, rd' = rd,
+      seen' = seen, err' = err,
+    }
+  }
+
+  action CheckpointPublishGen: bool = all {
+    Mode == "truncateFlagOn",
+    ck.pc == "schema",
+    gen' = gen + 1,
+    ck' = { ...ck, pc: "published" },
+    clock' = clock, lastCommitted' = lastCommitted, cat' = cat, ddl' = ddl, cookie' = cookie,
+    pubCookie' = pubCookie, pub' = pub, droppedRoots' = droppedRoots, nextId' = nextId,
+    tid' = tid, ddlLog' = ddlLog, UnchangedRowVars, bind' = bind, wal' = wal,
+    nBackfill' = nBackfill, db' = db, durable' = durable, backfillFloor' = backfillFloor,
+    nCk' = nCk, gcs' = gcs, rd' = rd, seen' = seen, err' = err,
   }
 
   action ApplyCheckpointPublish(nextPc: str, failed: bool): bool = {
@@ -1020,7 +1177,7 @@ module MvccPassiveSchema {
       clock' = clock, lastCommitted' = lastCommitted, ddl' = ddl, pubCookie' = pubCookie,
       tid' = tid, ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill,
       db' = db, backfillFloor' = backfillFloor, nCk' = nCk, rd' = rd, seen' = seen,
-      err' = err,
+      err' = err, gcs' = gcs,
     }
   }
 
@@ -1033,7 +1190,12 @@ module MvccPassiveSchema {
     val limit = Min(Pinned.map(r => rd.get(r).mark).union(Set(wal.length())).union(ddlMark))
     all {
       ck.pc == "published",
-      nondet upTo = nBackfill.to(limit).oneOf()
+      // TRUNCATE copies every frame and restarts the WAL, so it needs every
+      // read lock free. checkpoint_wal passes Busy up in this mode
+      // (csm.rs:3386-3405). WAL restart is not modeled.
+      Mode == "truncateFlagOn" implies not(TruncateBusy),
+      nondet upTo = (if (Mode == "truncateFlagOn") Set(wal.length())
+                     else nBackfill.to(limit)).oneOf()
       all {
         db' = if (upTo > nBackfill) Frame(upTo) else db,
         nBackfill' = upTo,
@@ -1079,7 +1241,10 @@ module MvccPassiveSchema {
   val FinishCatalog: str -> SCat = {
     val st = StampCatalog(ck.frame)
     val ddlMark = if (CatalogReads and ddl.pc != "none") Set(ddl.mark) else Set()
-    val floor = Min(Pinned.map(r => rd.get(r).mark).union(Set(nBackfill)).union(ddlMark))
+    // gc_floor_reader_mark (csm.rs:2237-2250): the marks in txs and the
+    // pager pins. An owner whose pin the pager commit ended is still in txs.
+    val floor = Min(Pinned.union(Registered).map(r => rd.get(r).mark)
+                      .union(Set(nBackfill)).union(ddlMark))
     Objs.mapBy(o =>
       if (CatalogReads and CatGcOk(o, st.get(o), floor)) { ...NoSCat, gone: true }
       else st.get(o))
@@ -1109,11 +1274,14 @@ module MvccPassiveSchema {
     ck' = { ...IdleCk, history: ck.history },
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
     wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable, nCk' = nCk,
-    rd' = rd, err' = err,
+    rd' = rd, err' = err, gcs' = gcs,
   }
 
+  // Readers or a DDL hold a WAL read lock, so a TRUNCATE backfill fails.
+  val TruncateBusy: bool = Pinned != Set() or (CatalogReads and ddl.pc != "none")
+
   action CheckpointFail(at: str): bool = all {
-    CheckpointFailures,
+    CheckpointFailures or (Mode == "truncateFlagOn" and at == "published" and TruncateBusy),
     ck.pc == at,
     if (FixCleanupPublishes and at == "committed") ApplyCheckpointPublish("idle", true)
     else all {
@@ -1145,6 +1313,7 @@ module MvccPassiveSchema {
   // Rule 3: drop the last current version when the B-tree has it for every
   // reader and no reader is open.
   action Gc(o: str): bool = all {
+    not(GcSamplesFirst),
     chain.get(o) != Set(),
     chain.get(o).forall(v => v.mat != 0 and v.mat <= GcFloor),
     Lwm == Inf,
@@ -1163,7 +1332,7 @@ module MvccPassiveSchema {
 
   // An open DDL transaction began after every committed drop, so it never
   // holds Rule 2 back. Its own row has no stamp (DdlExec).
-  def CatGcOk(o: str, x: SCat, floor: int): bool = {
+  def CatGcOkWith(o: str, x: SCat, floor: int, lwm: int, idle: bool): bool = {
     val d = cat.get(o).d
     val dropped = CatDropped(o)
     and {
@@ -1171,13 +1340,19 @@ module MvccPassiveSchema {
       not(x.gone),
       x.mat != 0,
       GuardCatalogGcFloor implies x.mat <= floor,
-      GuardCatalogGcLwm implies (if (dropped) d <= Lwm else (Lwm == Inf and ddl.pc == "none")),
+      GuardCatalogGcLwm implies (if (dropped) d <= lwm else idle),
     }
   }
+
+  // compute_lwm == MAX: no registered reader and no open DDL transaction.
+  val NoTx: bool = Lwm == Inf and ddl.pc == "none"
+
+  def CatGcOk(o: str, x: SCat, floor: int): bool = CatGcOkWith(o, x, floor, Lwm, NoTx)
 
   action GcCatalog(o: str): bool = {
     all {
       CatalogReads,
+      not(GcSamplesFirst),
       // compute_min_reader_mark counts the read mark of an open DDL. The
       // backfill limit already keeps backfillFloor at or below it.
       CatGcOk(o, scat.get(o), Min(Set(GcFloor).union(
@@ -1186,6 +1361,127 @@ module MvccPassiveSchema {
       seen' = if (CatDropped(o)) seen.union(Set("CatalogGcDropped")) else seen,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, chain' = chain,
       ins' = ins, UnchangedStoreVars, rd' = rd, err' = err,
+    }
+  }
+
+  /* gc_incremental in steps (GcSamplesFirst).
+     GcSample      sample_gc_lwm under the clock lock (mod.rs:8244, 8139-8145),
+                   then durable_txid_max and the floor (mod.rs:8261-8266),
+                   before any chain lock.
+     GcApply       one chain under its write lock with the sampled values
+                   (mod.rs:8282-8290). gc_chain_now computes a sampled MAX
+                   again, without the clock lock (mod.rs:8162-8166).
+     GcIndexPhase  gc_index_incremental keeps the lwm and reads the floor
+                   again (mod.rs:8307, 8356-8358).
+     GcEnd         the call returns. The budget of MAX_CHAINS_PER_GC chains
+                   (mod.rs:8019, 8278, 8366, 8382) only limits how many
+                   chains one call visits. The rest wait for a later call
+                   with a new sample (cursors at mod.rs:8302, 8404). A model
+                   call may apply to any subset of chains, so every budget
+                   and cursor position is a model run.
+     Rule 1 (aborted versions) and Rule 2 (ended versions, mod.rs:8591-8620)
+     find nothing in a row chain of this spec: a row is inserted once and
+     never updated, deleted or rolled back. The sqlite_schema chain of a
+     dropped table is Rule 2 (CatGcOkWith). rootpage_gc_protected
+     (mod.rs:8282, 8372) is left out, as for Gc (StampsAtOrAfterBinding). */
+  // compute_min_reader_mark counts the read mark of an open DDL transaction.
+  val DdlMarks: Set[int] = if (CatalogReads and ddl.pc != "none") Set(ddl.mark) else Set()
+  val GcFloorNow: int = Min(Set(GcFloor).union(DdlMarks))
+
+  val GcIdleNow: bool = if (GuardGcRechecksIdleLwm and gcs.idle) NoTx else gcs.idle
+  val GcLwmNow: int = if (GuardGcRechecksIdleLwm and gcs.idle) Lwm else gcs.lwm
+
+  // Outcomes of a GC step that drops a chain, for the reachability checks.
+  val GcSeen: Set[str] =
+    (if (Registered.exists(r => rd.get(r).b > gcs.at)) Set("GcAfterBegin") else Set())
+      .union(if (Readers.exists(r => rd.get(r).pc == "pinned")) Set("GcWithPinned") else Set())
+
+  action UnchangedForGc = all {
+    clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
+    bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, err' = err,
+  }
+
+  action GcSample: bool = all {
+    GcSamplesFirst,
+    gcs.pc == "idle",
+    // Only Rule 2 of a sqlite_schema chain reads the lwm value. Without
+    // CatalogReads the sample keeps 0, so TLC does not split states on it.
+    gcs' = { pc: "sampled", at: clock, lwm: if (CatalogReads) Lwm else 0, idle: NoTx,
+             floor: GcFloorNow },
+    chain' = chain, scat' = scat, seen' = seen,
+    UnchangedForGc,
+  }
+
+  // Rule 3 on the row chain of o.
+  action GcApply(o: str): bool = all {
+    if (Indexes.contains(o)) gcs.pc == "index" else gcs.pc == "sampled",
+    chain.get(o) != Set(),
+    chain.get(o).forall(v => v.mat != 0 and v.mat <= gcs.floor),
+    GcIdleNow,
+    chain' = chain.set(o, Set()),
+    seen' = seen.union(GcSeen),
+    scat' = scat, gcs' = gcs,
+    UnchangedForGc,
+  }
+
+  // Rule 2 or Rule 3 on the sqlite_schema chain of o (table id -1, a table chain).
+  action GcApplyCatalog(o: str): bool = all {
+    CatalogReads,
+    gcs.pc == "sampled",
+    CatGcOkWith(o, scat.get(o), gcs.floor, GcLwmNow, GcIdleNow),
+    scat' = scat.set(o, { ...NoSCat, gone: true }),
+    seen' = seen.union(GcSeen).union(if (CatDropped(o)) Set("CatalogGcDropped") else Set()),
+    chain' = chain, gcs' = gcs,
+    UnchangedForGc,
+  }
+
+  action GcIndexPhase: bool = all {
+    Indexes != Set(),
+    gcs.pc == "sampled",
+    gcs' = { ...gcs, pc: "index", floor: GcFloorNow },
+    chain' = chain, scat' = scat, seen' = seen,
+    UnchangedForGc,
+  }
+
+  action GcEnd: bool = all {
+    Set("sampled", "index").contains(gcs.pc),
+    gcs' = IdleGc,
+    chain' = chain, scat' = scat, seen' = seen,
+    UnchangedForGc,
+  }
+
+  // ---------------------------------------------------------------------------
+  // Owner path: an inner transaction commits on a reader's connection
+
+  // A statement of reader r calls nextval. The inner transaction
+  // (op_sequence_begin_inner_tx, execute.rs:14356-14420) commits a sequence
+  // row, which this spec does not model. Its CommitStateMachine runs on r's
+  // connection, removes the inner tx and starts the auto-checkpoint there
+  // (mod.rs:3698-3721), while r's outer snapshot stays in txs. The inner
+  // begin returns Busy during an unpublished DDL commit, as ReaderBegin.
+  // With FixRefuseCheckpointOwner the commit starts no checkpoint, and the
+  // commit alone changes nothing that this spec models, so the action is off.
+  action InnerCommitCheckpoint(r: str): bool = {
+    val c = clock + 1
+    all {
+      CheckpointOwnerReaders,
+      not(FixRefuseCheckpointOwner),
+      Mode == "passive",
+      Set("active", "open").contains(rd.get(r).pc),
+      not(GuardBusyOnUnpublished and ddl.pc == "preparing"),
+      clock < MaxTs,
+      ck.pc == "idle", ck.pending == Set(), nCk < MaxCheckpoints,
+      clock' = c,
+      lastCommitted' = Max(Set(lastCommitted, c)),
+      ck' = { ...IdleCk, pc: "collect", owner: r, auto: true,
+              snap: if (ddl.pc == "preparing") Min(Set(c, ddl.ts - 1)) else c,
+              old: durable, todo: Objs, img: LastImg.img, bcat: LastImg.bcat,
+              history: ck.history },
+      nCk' = nCk + 1,
+      UnchangedSchemaVars, UnchangedRowVars,
+      bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+      backfillFloor' = backfillFloor, gcs' = gcs, rd' = rd, seen' = seen, err' = err,
     }
   }
 
@@ -1216,6 +1512,7 @@ module MvccPassiveSchema {
         ReaderRead(r),
         ReaderReadCatalog(r),
         ReaderEnd(r),
+        InnerCommitCheckpoint(r),
       },
     },
     nondet at = Set("collect", "committed", "published", "backfilled", "truncated").oneOf()
@@ -1228,6 +1525,10 @@ module MvccPassiveSchema {
     CheckpointObjAlter(o),
     CheckpointCommit,
     CheckpointPublish,
+    CheckpointPublishRoots,
+    CheckpointPublishHeader,
+    CheckpointPublishSchema,
+    CheckpointPublishGen,
     CheckpointBackfill,
     CheckpointTruncateLog,
     CheckpointFinish,
@@ -1235,6 +1536,13 @@ module MvccPassiveSchema {
     Gc(o),
     nondet o = Objs.oneOf()
     GcCatalog(o),
+    GcSample,
+    nondet o = Objs.oneOf()
+    GcApply(o),
+    nondet o = Objs.oneOf()
+    GcApplyCatalog(o),
+    GcIndexPhase,
+    GcEnd,
   }
 
   // ---------------------------------------------------------------------------
@@ -1369,9 +1677,19 @@ module MvccPassiveSchema {
   val GcNeverRunsUnderNewerBinding: bool =
     not(Objs.exists(o => and {
       chain.get(o) != Set(),
-      chain.get(o).forall(v => v.mat != 0 and v.mat <= GcFloor),
-      Lwm == Inf,
-      bind.get(o).in, bind.get(o).mat > GcFloor,
+      bind.get(o).in,
+      or {
+        and {
+          chain.get(o).forall(v => v.mat != 0 and v.mat <= GcFloor),
+          Lwm == Inf, bind.get(o).mat > GcFloor,
+        },
+        // A sampled GC call applies its older floor.
+        and {
+          gcs.pc != "idle",
+          chain.get(o).forall(v => v.mat != 0 and v.mat <= gcs.floor),
+          GcIdleNow, bind.get(o).mat > gcs.floor,
+        },
+      },
     }))
 
   // The current sqlite_schema row of a live table points at its live B-tree.
@@ -1379,8 +1697,11 @@ module MvccPassiveSchema {
   def NewestRoot(o: str): int =
     if (cat.get(o).a != 0 and Resolved(cat.get(o).a)) cat.get(o).r2 else cat.get(o).r1
 
+  // A publish has started and has not reached the shared schema yet.
+  val PublishPending: bool = Set("committed", "roots", "header").contains(ck.pc)
+
   val SchemaRowCurrent: bool =
-    ck.pc != "committed" implies
+    not(PublishPending) implies
       Objs.forall(o =>
         (Alters and cat.get(o).c != 0 and Resolved(cat.get(o).c) and cat.get(o).d == Inf)
         implies and {
@@ -1403,7 +1724,7 @@ module MvccPassiveSchema {
       Frame(i).img.get(p).own != NoObj implies Objs.exists(o => Frame(i).bcat.get(o) == p)))
 
   val PagesAccounted: bool =
-    (ck.pc != "committed" and ck.pending == Set()) implies
+    (not(PublishPending) and ck.pending == Set()) implies
       Pages.forall(p => LastImg.img.get(p).own != NoObj
                         implies (SchemaRoot(p) or droppedRoots.contains(p)))
 
@@ -1460,6 +1781,15 @@ module MvccPassiveSchema {
   // Recovery replays a row record above the boundary.
   val NeverReplaysRow: bool =
     not(Objs.exists(o => LoggedLive(o) and ins.get(o).ts > Meta and Meta > 0))
+  // Mode T: a reader begins between two parts of the publish.
+  val NeverBeginsMidPublish: bool = not(seen.contains("BeginMidPublish"))
+  // An inner commit's auto-checkpoint commits a frame on the connection of a
+  // reader that is still in txs and still pinned.
+  val NeverAutoCheckpointOnReader: bool = not(ck.history.contains("autoOwnerCommit"))
+  // GC drops a chain after a reader began between the sample and the drop.
+  val NeverGcAfterBegin: bool = not(seen.contains("GcAfterBegin"))
+  // GC drops a chain while a reader pinned a WAL mark and is not in txs yet.
+  val NeverGcWithPinned: bool = not(seen.contains("GcWithPinned"))
   // A negative schema root with a root page outlives the publish.
   val NeverOwnedNegative: bool =
     ck.pc == "idle" implies
