@@ -525,18 +525,37 @@ def job_verify(stats, rng, it):
         if not invs:
             continue
         k = rng.choice([3, 4, 5, 6, 8])
+        tlc = spec in stats.setdefault("apalache_unsupported", [])
         t0 = time.time()
-        code, out = run([QUINT, "verify", path, "--main", "main", "--init", "Init", "--step", "Next",
-                         "--invariants"] + invs.split() + ["--max-steps", str(k),
-                         "--server-endpoint", SERVER, "--verbosity", "1"], env=env)
+        if tlc:
+            # Apalache cannot read this spec, so TLC checks the whole main
+            # configuration, as `make check` does.
+            cfg = os.path.join(tmp, "tlc.json")
+            with open(cfg, "w") as f:
+                json.dump({"workers": int(THREADS)}, f)
+            k = "all"
+            code, out = run([QUINT, "verify", path, "--main", "main", "--init", "Init", "--step", "Next",
+                             "--invariants"] + invs.split() + ["--backend", "tlc", "--tlc-config", cfg,
+                             "--server-endpoint", SERVER, "--verbosity", "3"], env=env)
+        else:
+            code, out = run([QUINT, "verify", path, "--main", "main", "--init", "Init", "--step", "Next",
+                             "--invariants"] + invs.split() + ["--max-steps", str(k),
+                             "--server-endpoint", SERVER, "--verbosity", "1"], env=env)
+        if "Expected a constant integer range" in out:
+            stats["apalache_unsupported"].append(spec)
+            log(f"verify {spec}/main: Apalache cannot read this spec, TLC checks it from now on")
+            continue
         secs = int(time.time() - t0)
         bump(stats, spec, "verify_runs", 1)
         shutil.rmtree(os.path.join(SPECS, "_apalache-out"), ignore_errors=True)
         if code is None:
             log(f"verify {spec}/main max-steps={k}: timeout after {secs}s")
         elif "[ok]" in out:
-            bump(stats, spec, "verify_ok_steps", k)
-            log(f"verify {spec}/main max-steps={k}: ok {secs}s")
+            states = re.findall(r"([0-9,]+) distinct states found", out)
+            if states:
+                bump(stats, spec, "tlc_distinct_states", int(states[-1].replace(",", "")))
+            bump(stats, spec, "verify_ok_runs", 1)
+            log(f"verify {spec}/main max-steps={k}: ok {secs}s {states[-1] + ' distinct states' if states else ''}")
         elif "[violation]" in out or "Invariant violated" in out:
             log(f"VIOLATION verify {spec}/main max-steps={k} {secs}s: {out.strip()[-600:]}")
         else:
