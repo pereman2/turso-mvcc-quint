@@ -111,10 +111,6 @@ has that function.
 
 ## Open items
 
-- The row driver of the replay does not map two actions that the
-  checkpoint-stop spec added: `CheckpointBeginPager` and
-  `CheckpointTruncateDecide`. The committed traces still replay. New traces
-  from `make traces` are refused at the first `CheckpointBeginPager` step.
 - The test-only hooks in `harness/turso-hooks.patch` are not in turso. Until
   turso has them, the replay runs only through `run-in-turso.sh`.
 - The pinned turso does not have the engine changes of #11794. The docs

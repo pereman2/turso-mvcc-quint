@@ -118,14 +118,26 @@ as before. The `mbt` module sets them, and `make traces` uses it.
 ## Refused traces
 
 Some engine steps contain several spec actions. The test driver refuses a
-trace that splits such a step, and the test asserts a minimum number of
-replayed traces. Of 200 traces of the `mbt` module, 146 replay and 54 are
-refused, for these reasons:
+trace that splits such a step. A trace of the `mbt` module splits none of
+them, so every such trace replays. Of 3300 traces of the `mbt` module, 3300
+replay.
 
-- A reader pins its WAL mark and begins in one engine step
-  (`begin_fresh_mvcc_tx`). The driver pins at `ReaderBegin`, so it refuses a
-  trace with a frame commit or a backfill between `ReaderPin` and
-  `ReaderBegin`.
+- A reader pins its WAL mark at `ReaderPin` with `Pager::begin_read_tx`. At
+  `ReaderBegin` it runs `BEGIN` and a `SELECT`. `begin_fresh_mvcc_tx`
+  (`core/vdbe/execute.rs`) adopts a read mark that the caller holds, so the
+  engine begins the MVCC transaction on the pinned mark. `ReaderEnd` ends
+  the pager read transaction.
+- `CheckpointBeginPager` steps the engine past `BeginPagerTxn`. For an empty
+  pass it steps to `CheckpointWal`, because the engine then skips the pager
+  commit and the publish.
+- The driver refuses `CheckpointTruncateDecide` when `SplitLogTruncate` is
+  true, because the engine decides and truncates the logical log in one
+  step. It refuses `CheckpointPublishBoundary` (mode T) and
+  `CheckpointTruncateApply`, which have no engine operation.
+- A spec read has two looks at the chain. The engine read is one statement,
+  so the driver reads and compares at both `ReaderReadStart` and
+  `ReaderReadEnd`. The oracle is the same at both, because every later
+  commit timestamp is above the begin of the reader.
 
 The schema driver runs the whole collection at the last `CheckpointObj` of a
 pass. A commit between two `CheckpointObj` steps is above the snapshot, so it

@@ -18,11 +18,9 @@ struct Writer {
 
 enum ReaderState {
     Idle,
-    /// The spec reader pinned a WAL mark. The engine pins and begins in one
-    /// step, so the engine reader starts at ReaderBegin.
-    Pinned {
-        mark: i64,
-    },
+    /// The reader holds a pager read mark and has no MVCC transaction yet.
+    /// `begin_fresh_mvcc_tx` adopts a read mark that the caller holds.
+    Pinned,
     Active {
         key: i64,
     },
@@ -68,6 +66,7 @@ impl Driver for RowDriver {
             "ReaderEnd" => self.reader_end(step)?,
             "CheckpointStart" => self.checkpoint_start(step)?,
             "CheckpointCollect" => self.checkpoint_collect(step)?,
+            "CheckpointBeginPager" => self.checkpoint_begin_pager(step)?,
             "CheckpointCommit" => self.checkpoint_commit(step)?,
             "CheckpointPublish" => self
                 .ck
@@ -76,6 +75,7 @@ impl Driver for RowDriver {
             "CheckpointTruncateLog" => self
                 .ck
                 .step_until(|state| state == CheckpointState::TruncateWal),
+            "CheckpointTruncateDecide" => self.checkpoint_truncate_decide(step)?,
             "CheckpointStamp" => self.ck.finish(),
             "Gc" => self.gc(step)?,
             other => return refuse(format!("no engine operation for {other}")),
@@ -219,41 +219,57 @@ impl RowDriver {
         let name = step.pick("r").str().to_string();
         let mark = step.var("rd").get_str(&name).field("mark").int();
         let db = &self.db;
-        let reader = self.readers.entry(name).or_insert_with(|| Reader {
+        let reader = self.readers.entry(name.clone()).or_insert_with(|| Reader {
             conn: db.connect(),
             state: ReaderState::Idle,
         });
-        reader.state = ReaderState::Pinned { mark };
+        let pager = reader.conn.pager.load();
+        pager.begin_read_tx().unwrap();
+        let pinned = pager.wal.as_ref().unwrap().get_max_frame();
+        reader.state = ReaderState::Pinned;
+        let pinned = self.counted_frame(self.last_wal.0, pinned);
+        if self.frames.get(mark as usize) != Some(&pinned) {
+            return fail(
+                Failure::Frame,
+                format!(
+                    "reader {name} pinned spec mark {mark}, engine frame {pinned}, frames {:?}",
+                    self.frames
+                ),
+            );
+        }
         Ok(())
     }
 
     fn reader_begin(&mut self, step: &Step) -> StepOutcome {
-        let wal_len = step.var("wal").items().len() as i64;
         let reader = self.readers.get_mut(step.pick("r").str()).unwrap();
-        let ReaderState::Pinned { mark } = reader.state else {
+        let ReaderState::Pinned = reader.state else {
             panic!("ReaderBegin of a reader that is not pinned");
         };
-        if mark != wal_len {
-            return refuse("a checkpoint frame came between the pin and the begin of a reader");
-        }
         reader.conn.execute("BEGIN").unwrap();
         get_rows(&reader.conn, "SELECT count(*) FROM t");
         reader.state = ReaderState::Active { key: 0 };
         Ok(())
     }
 
+    /// The engine read is one step, so the driver reads at both looks of the
+    /// spec read. The oracle is the same at both, because every later commit
+    /// timestamp is above the begin of the reader.
     fn reader_read_start(&mut self, step: &Step) -> StepOutcome {
         let key = spec_key(step.pick("k"));
-        let reader = self.readers.get_mut(step.pick("r").str()).unwrap();
+        let name = step.pick("r").str();
+        let reader = self.readers.get_mut(name).unwrap();
         reader.state = ReaderState::Active { key };
-        Ok(())
+        self.read_and_compare(step, name)
     }
 
     fn reader_read_end(&mut self, step: &Step) -> StepOutcome {
-        let name = step.pick("r").str();
+        self.read_and_compare(step, step.pick("r").str())
+    }
+
+    fn read_and_compare(&self, step: &Step, name: &str) -> StepOutcome {
         let reader = &self.readers[name];
         let ReaderState::Active { key } = reader.state else {
-            panic!("ReaderReadEnd of a reader that is not active");
+            panic!("a read of a reader that is not active");
         };
         let begin = step.var("rd").get_str(name).field("b").int();
         let want = latest_in(step.var("writes"), key, begin);
@@ -274,6 +290,10 @@ impl RowDriver {
         let reader = self.readers.get_mut(step.pick("r").str()).unwrap();
         if let ReaderState::Active { .. } = reader.state {
             reader.conn.execute("ROLLBACK").unwrap();
+        }
+        let pager = reader.conn.pager.load();
+        if pager.holds_read_lock() {
+            pager.end_read_tx();
         }
         reader.state = ReaderState::Idle;
         Ok(())
@@ -383,6 +403,36 @@ impl RowDriver {
         Ok(())
     }
 
+    /// The engine begins the pager transaction after the collection. A pass
+    /// with nothing to write skips the pager commit and the publish.
+    fn checkpoint_begin_pager(&mut self, step: &Step) -> StepOutcome {
+        match step.var("ck").field("pc").str() {
+            "writing" => self.ck.step_until(|state| {
+                !matches!(
+                    state,
+                    CheckpointState::CollectTableRows
+                        | CheckpointState::CollectIndexRows
+                        | CheckpointState::BeginPagerTxn
+                )
+            }),
+            "published" => self
+                .ck
+                .step_until(|state| state == CheckpointState::CheckpointWal),
+            other => return refuse(format!("CheckpointBeginPager to {other}")),
+        }
+        Ok(())
+    }
+
+    /// The engine decides and truncates the logical log in one step.
+    fn checkpoint_truncate_decide(&mut self, step: &Step) -> StepOutcome {
+        if step.var("ck").field("pc").str() != "truncated" {
+            return refuse("the truncate decision and its I/O are separate steps");
+        }
+        self.ck
+            .step_until(|state| state == CheckpointState::TruncateWal);
+        Ok(())
+    }
+
     fn checkpoint_commit(&mut self, step: &Step) -> StepOutcome {
         let spec_wrote = step.var("ck").field("frame").int() != 0;
         let wrote = self.ck.commit();
@@ -399,15 +449,7 @@ impl RowDriver {
         Ok(())
     }
 
-    fn checkpoint_backfill(&mut self, step: &Step) -> StepOutcome {
-        let wal_len = step.var("wal").items().len() as i64;
-        let pinned_below = self
-            .readers
-            .values()
-            .any(|reader| matches!(reader.state, ReaderState::Pinned { mark } if mark < wal_len));
-        if pinned_below {
-            return refuse("a backfill ran while a reader pinned a mark but did not begin");
-        }
+    fn checkpoint_backfill(&mut self, _step: &Step) -> StepOutcome {
         self.ck
             .step_until(|state| state == CheckpointState::TruncateLogicalLog);
         Ok(())
@@ -587,8 +629,8 @@ fn hand_written_row_trace_conforms() {
     assert_eq!(replayed, Replay::Done);
 }
 
-/// Traces of the mbt module from `make traces`. rows-196 is refused: a
-/// backfill runs between the pin and the begin of a reader.
+/// Traces of the mbt module from `make traces`. In rows-196 a backfill runs
+/// between the pin and the begin of a reader.
 const GENERATED_ROW_TRACES: [(&str, &str); 7] = [
     ("rows-23", include_str!("traces/rows-23.itf.json")),
     ("rows-66", include_str!("traces/rows-66.itf.json")),
@@ -608,7 +650,7 @@ fn generated_row_traces_conform() {
         }
     }
     assert!(
-        replayed >= 6,
+        replayed == GENERATED_ROW_TRACES.len(),
         "only {replayed} traces replayed: a change to the driver or the engine refuses more traces"
     );
 }
