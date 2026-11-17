@@ -21,7 +21,7 @@ The state counts below come from the docs in this folder. `make bug-traces ONLY=
 | 2 | #11751: an ALTER during the first checkpoint of a table loses its rows after a crash. | `DESIGN-schema.md`, Findings 6 | Held up | Variant `noAlterRecovery` breaks `RecoveryCorrect`. The Rust test fails 3 of 3 runs. It shows lost rows, or the #11501 panic when no pages are free. [Issue #11751](https://github.com/tursodatabase/turso/issues/11751) |
 | 3 | #11749: a rolled-back UPDATE keeps a checkpointed version in memory. | `DESIGN-rows.md`, Findings 1 | Held up | The reachability check `NeverLeavesUnstampedCurrent` fails in `aborts`. This is not an invariant violation. The Rust test shows `materialized_at` reset to `ORIGIN`. It is a memory leak, not a correctness bug. [Issue #11749](https://github.com/tursodatabase/turso/issues/11749) |
 | 4 | #11831: a checkpoint on the connection of an open transaction breaks its snapshot. | `SIMPLIFY.md` step 4, PR #11794 | Found by Rust or code reading | A Rust run found it while the step 4 check ran. It was modeled afterwards (`CheckpointOnReaderConnection`, commit 80e4c9532). The step 4 check found the bug, not the model. [PR #11831](https://github.com/tursodatabase/turso/pull/11831) |
-| 5 | #11835: a checkpoint that stops partway strands versions and leaks root pages. | PR #11837 | Found by Rust or code reading | PR #11837 says that the specs missed bugs that Rust reproduces. Variants `failedPublish` and `failedCommit` came afterwards. [PR #11837](https://github.com/tursodatabase/turso/pull/11837) |
+| 5 | #11835: a checkpoint that stops partway strands versions and leaks root pages. | PR #11837 | Found by Rust or code reading | PR #11837 says that the specs missed bugs that Rust reproduces. Variants `failedPublish` and `failedCommit` came afterwards. The fix is open PR #11835. On turso main at ae2cb7388 the bug remains: in a Rust probe with `QueuedIo::fault_after(".db", Sync, 0)`, a passive or blocking checkpoint fails at its database sync after the publish, and the version of the row stays in the store through three later checkpoints (3 of 3 runs, recovery spec `idea2` and `idea2Passive`, invariant `NoLeak`). [PR #11837](https://github.com/tursodatabase/turso/pull/11837) |
 | 6 | #11836: a TRUNCATE checkpoint with the flag on purges sequence chains under an open reader. | `MODEL-GAPS.md`, gap 1 | Found by Rust or code reading | It began as a code-reading lead that was "not verified with a test". The Rust fix came first (Nov 14, 03:11 CET). Variant `truncateFlagOn` came after it (03:53 CET). [PR #11836](https://github.com/tursodatabase/turso/pull/11836) |
 | 7 | #11833: VACUUM panics with an open passive reader. | PR #11833 | Found by Rust or code reading | Neither the PR nor any spec mentions the model. [PR #11833](https://github.com/tursodatabase/turso/pull/11833) |
 | 8 | The publish drain bit (`checkpoint_publish_in_progress`) is dead code. | `MODEL-GAPS.md`, mechanism table | Found by Rust or code reading | It comes from a code read with `rg`, not from a model run. No test shows it. It stays a lead. |
@@ -125,5 +125,12 @@ says otherwise.
   point in the middle of a checkpoint, and a backfill held by a reader. All
   3580 traces replay with no divergence. Before the driver fix of 84ceff4,
   44% of fresh traces were refused at the reader pin.
+- 2026-11-17, row spec, the `mbt` constants with 3 keys, 3 readers, `MaxTs =
+  14` and `MaxCheckpoints = 6`. 1800 fresh traces of 150 steps (271800
+  states), with 284 reader begins on a mark below the WAL end and 2300 reads
+  on a stale mark. All replay with no divergence.
 - 2026-11-17, recovery spec, lead `leadA`. Reproduced on turso main as the
   engine bug above.
+- 2026-11-17, recovery spec, leads `idea2` and `idea2Passive`. Reproduced on
+  turso main with an I/O fault. This is the known bug of open PR #11835, so
+  it is in finding 5, not a new report.
