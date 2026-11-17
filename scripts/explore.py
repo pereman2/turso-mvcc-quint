@@ -335,7 +335,7 @@ def job_sim(stats, rng, it):
             module, invs = pick[0], pick[1]
             file = pick[2] if len(pick) > 2 else path
             seed = rng.randrange(1, 2**31)
-            samples = rng.choice([2000, 5000, 10000]) if steps <= 40 else rng.choice([500, 1000, 3000])
+            samples = rng.choice([20000, 50000]) if steps <= 40 else rng.choice([5000, 10000])
             itf = os.path.join(OUT, "run", f"sim-{spec}-{module}-{seed}.itf.json")
             t0 = time.time()
             res, out = quint_run(file, module, invs, seed, samples, steps, itf=itf)
@@ -383,7 +383,7 @@ def row_traces(stats, rng, label, path, module, count, steps):
 def job_traces(stats, rng, it):
     path = os.path.join(SPECS, "MvccPassiveCheckpointConfigs.qnt")
     steps = rng.choice([40, 80, 150])
-    folder = row_traces(stats, rng, f"mbt-it{it}", path, "mbt", rng.choice([600, 900]), steps)
+    folder = row_traces(stats, rng, f"mbt-it{it}", path, "mbt", rng.choice([900, 1500]), steps)
     if folder:
         replay(stats, folder, f"mbt-it{it}-steps{steps}")
     if stop_requested():
@@ -391,7 +391,7 @@ def job_traces(stats, rng, it):
     big = write_gen("BigRowsMbt", bigger(module_text(path, "mbt"), "mbtBig", rng))
     if typechecks(big):
         steps = rng.choice([80, 150, 250])
-        folder = row_traces(stats, rng, f"mbtBig-it{it}", big, "mbtBig", 300, steps)
+        folder = row_traces(stats, rng, f"mbtBig-it{it}", big, "mbtBig", 600, steps)
         if folder:
             replay(stats, folder, f"mbtBig-it{it}-steps{steps}")
 
