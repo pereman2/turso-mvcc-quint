@@ -1,0 +1,5 @@
+explore-out/
+specs/explore-gen/
+specs/traces/
+specs/states/
+harness/target/
