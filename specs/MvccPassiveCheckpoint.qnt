@@ -40,10 +40,15 @@
  *   GcSamplesFirst GC samples lwm and the floor first, then applies the
  *                  rules to a chain in a later step.
  *
+ * Mode B (Mode = "blocking", the passive flag off) is two actions: a pass that
+ * succeeds (CheckpointBlocking, one atomic step, with the WAL restart in
+ * counted frames and the GC sweep) and a pass that stops after its publish
+ * (CheckpointBlockingFail).
+ *
  * Not modeled: schema changes and root-page bindings, indexes, sequences,
- * WAL restart, aborts of Active writers and aborts after the log append,
- * write-write conflicts between writers, page-level I/O, and the final
- * blocking GC sweep.
+ * the WAL restart in passive mode, aborts of Active writers and aborts after
+ * the log append, write-write conflicts between writers, page-level I/O, and
+ * a crash inside a mode B pass.
  *
  * Notes on the Quint code:
  *   - Keys and Readers are strings. The model checker sees every order of
@@ -126,6 +131,28 @@ module MvccPassiveCheckpoint {
   const WritersPinMarks: bool      // a writer holds a WAL read mark from its
                                    // prepare to its finish, and the backfill
                                    // stops at it
+
+  // Mode B (Mode = "blocking": the passive flag is off). All "off" values give
+  // the passive model, state for state.
+  const PagerPinsWithoutGate: bool          // a pinned reader holds a WAL mark but not the
+                                            // gate (schema reparse, raw WAL API). Off: a
+                                            // pinned reader holds the gate.
+  const GuardB2KeepUncheckpointed: bool     // Rule 2 B keeps `e > ckpt_max && (...)`. Off:
+                                            // drop every superseded version with e < lwm.
+  const GuardB2InBtree: bool                // the in_btree term of that keep clause
+  const GuardB2Tombstone: bool              // the not(hasCurrent) term of that keep clause
+  const GuardB3InCkptMax: bool              // Rule 3 B needs b <= ckpt_max
+  const GuardFallThroughCkptMax: bool       // the B-tree fall-through needs b <= durable
+  const GuardFallThroughMark: bool          // the fall-through needs mat != 0 and mark >= mat
+  const BlockingStampOrigin: bool           // what-if: the B stamp writes mat = 0 (gap 14)
+  const FixB2WaitsForPinned: bool           // a fix that keeps GC alive: Rule 2 B drops nothing
+                                            // while a pinned read mark is below the WAL max
+                                            // frame. It counts readers on slot 0 too, which
+                                            // min_pinned_read_frame() skips. Not in the engine.
+  const BlockingFailTruncatesLog: bool      // what-if: a failed pass empties the logical
+                                            // log and its frame never lands (RecoveryCorrect
+                                            // control). With the frame, RecoveryCorrect holds.
+  const BlockingStopsAfterStamp: bool       // a pass can stop after its stamp, before its GC
 
   pure val Inf = 1000   // "no end timestamp", "no reader"
   pure val None = -1    // "no visible version"
@@ -432,11 +459,41 @@ module MvccPassiveCheckpoint {
   // Readers
 
   action UnchangedForReaders = all {
+    ck' = ck,
+    UnchangedForReadersExceptCk,
+  }
+
+  action UnchangedForReadersExceptCk = all {
     clock' = clock, chain' = chain, inflight' = inflight, lastCommitted' = lastCommitted,
     llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta,
-    durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk,
+    durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
     writes' = writes, logged' = logged,
   }
+
+  // Mode B (btree_covers_chain_for_snapshot, chain_is_write_buffer_for): when
+  // the chain is one current version that began before the reader, is inside
+  // the durable boundary and has a stamp at or below the reader's mark, the
+  // look skips the chain. The B-tree at the read mark decides, as it does for
+  // an empty chain. Passive mode returns false at once.
+  def FallThrough(c: Set[Version], b: int, mark: int): bool = and {
+    Mode == "blocking",
+    c.size() == 1,
+    val v = AnyVersion(c)
+    and {
+      v.e == Inf, v.b != 0, Resolved(v.b), v.b < b,
+      not(GuardFallThroughCkptMax) or v.b <= durable,
+      not(GuardFallThroughMark) or (v.mat != 0 and mark >= v.mat),
+    },
+  }
+
+  def LookVis(c: Set[Version], b: int, mark: int): int =
+    if (FallThrough(c, b, mark)) None else VisibleValue(c, b)
+
+  def LookValid(c: Set[Version], b: int, mark: int): bool =
+    if (FallThrough(c, b, mark)) true else BtreeRowValid(c, b)
+
+  def SeenFall(c: Set[Version], b: int, mark: int): CkState =
+    if (FallThrough(c, b, mark)) { ...ck, seen: ck.seen.union(Set("fellThrough")) } else ck
 
   // pager.wal_pos() is read before the clock lock in begin_tx, so a reader
   // holds its WAL read mark for a while before it is in txs.
@@ -475,18 +532,19 @@ module MvccPassiveCheckpoint {
     ck.owner != r or ck.pc == "idle",
     rd.get(r).pc == "active",
     rd' = rd.setBy(r, x => { ...x, pc: "reading", key: k,
-                             vis1: VisibleValue(chain.get(k), x.b),
-                             valid1: BtreeRowValid(chain.get(k), x.b),
+                             vis1: LookVis(chain.get(k), x.b, x.mark),
+                             valid1: LookValid(chain.get(k), x.b, x.mark),
                              deps1: SpecDeps(k, x.b) }),
-    UnchangedForReaders, err' = err,
+    ck' = SeenFall(chain.get(k), rd.get(r).b, rd.get(r).mark),
+    UnchangedForReadersExceptCk, err' = err,
     UnchangedRowVars,
   }
 
   action ReaderReadEnd(r: str): bool = {
     val k = rd.get(r).key
     val b = rd.get(r).b
-    val vis2 = VisibleValue(chain.get(k), b)
-    val valid2 = BtreeRowValid(chain.get(k), b)
+    val vis2 = LookVis(chain.get(k), b, rd.get(r).mark)
+    val valid2 = LookValid(chain.get(k), b, rd.get(r).mark)
     val bt = BtreeAt(k, rd.get(r).mark)
     // Version store side first, B-tree side second.
     val resA = if (rd.get(r).vis1 != None) rd.get(r).vis1 else if (valid2) bt else 0
@@ -505,7 +563,8 @@ module MvccPassiveCheckpoint {
                                   got: Set(resA, resB), want: want, deps: deps })),
       readDeps' = if (GuardReadersAbortOnDependency) readDeps else readDeps.union(deps),
       rd' = rd.setBy(r, x => { ...x, pc: "active", deps1: Set() }),
-      UnchangedForReaders,
+      ck' = SeenFall(chain.get(k), b, rd.get(r).mark),
+      UnchangedForReadersExceptCk,
       aborted' = aborted, dirty' = dirty, lateMarks' = lateMarks, UnchangedFullScan,
       gcs' = gcs,
     }
@@ -540,6 +599,7 @@ module MvccPassiveCheckpoint {
     all {
       (FixRefuseCheckpointOwner and owner != "") implies
         not(Pinned.union(Registered).contains(owner)),
+      Mode != "blocking",
       ck.pc == "idle",
       nCk < MaxCheckpoints,
       ck' = { pc: "collect", owner: owner, snap: SnapshotTs, old: durable, todo: Keys, wset: EmptyFn,
@@ -815,10 +875,144 @@ module MvccPassiveCheckpoint {
   }
 
   // ---------------------------------------------------------------------------
+  // Mode B checkpoint (the passive flag is off)
+  //
+  // A MVCC transaction holds blocking_checkpoint_lock in read mode from begin
+  // to the end of the transaction. The checkpoint takes the write mode with a
+  // try lock at AcquireLock and fails with Busy while a transaction is open.
+  // So a pass that succeeds runs with no MVCC actor open, and no other actor
+  // can run between its steps. The model merges the pass into one action. The
+  // only actors that remain are GC (it takes the read mode as a try lock, so
+  // it cannot run inside the pass) and a pager reader with no MVCC
+  // transaction. A pager reader makes the pass fail at CheckpointWal, after
+  // the publish. That is CheckpointBlockingFail.
+  //
+  // The WAL restart (restart_log in CheckpointWal) needs no variable. Frame
+  // numbers here count across restarts, as the replay does. The row stamp
+  // pager.wal_pos() after the restart is (seq + 1, 0), which counts to frame F.
+
+  // The spec counts (seq, F) and (seq + 1, 0) as frame F. The engine orders them.
+  // A reader pinned at (seq, F) blocks the restart, so a successful pass never
+  // meets it. Only CheckpointBlockingStop can.
+  // The rows of the pass: each key that changed in (old, snap], with its value at snap.
+  def BlockingWset(snap: int): str -> int =
+    Keys.filter(k => ChangedSince(chain.get(k), durable, snap))
+        .fold(EmptyFn, (m, k) => m.put(k, ValueAt(chain.get(k), snap)))
+
+  def BlockingWrites(snap: int): bool =
+    BlockingWset(snap).keys() != Set() or Max(Set(durable, snap)) > durable
+
+  // The database file after the backfill of frames lo..hi of a WAL w.
+  def DbAfterBackfill(w: List[WalFrame], lo: int, hi: int): str -> int =
+    Keys.mapBy(k =>
+      if (lo.to(hi).filter(i => w[i - 1].w.keys().contains(k)) == Set()) db.get(k)
+      else w[Max(lo.to(hi).filter(i => w[i - 1].w.keys().contains(k))) - 1].w.get(k))
+
+  // The version store after the stamp of the pass: every version of a written
+  // key whose last event is at or below snap gets mat = F.
+  def StampedChains(wset: str -> int, snap: int, f: int): str -> Set[Version] =
+    Keys.mapBy(k =>
+      if (wset.keys().contains(k))
+        chain.get(k).map(v =>
+          if (Resolved(LastEvent(v)) and LastEvent(v) <= snap)
+            { ...v, mat: if (BlockingStampOrigin) 0 else f }
+          else v)
+      else chain.get(k))
+
+  action CheckpointBlocking: bool = BlockingPass(true)
+
+  // Variant only (BlockingStopsAfterStamp): the pass stops after its stamp and
+  // before its GC. Whether the engine can stop there is not verified.
+  action CheckpointBlockingStop: bool = all {
+    BlockingStopsAfterStamp,
+    BlockingPass(false),
+  }
+
+  action BlockingPass(withGc: bool): bool = {
+    val snap = lastCommitted     // no writer is in flight, so snapshot_ts is lastCommitted
+    val wset = BlockingWset(snap)
+    val boundary = Max(Set(durable, snap))
+    val write = BlockingWrites(snap)
+    val newWal = if (write) wal.append({ w: wset, meta: boundary }) else wal
+    val f = newWal.length()
+    val stamped = StampedChains(wset, snap, f)
+    // GcTableRows and Finalize run with lwm = MAX and the floor backfill_floor = f.
+    val collected = if (withGc) Keys.mapBy(k => GcChainB(stamped.get(k), Inf, boundary, f))
+                    else stamped
+    val b3 = withGc and Keys.exists(k =>
+      Rule3B(AfterRule2B(stamped.get(k), Inf, boundary, f), Inf, boundary, f))
+    val left = Keys.exists(k => collected.get(k) != Set())
+    val stampRan = Keys.exists(k => stamped.get(k).exists(v => v.mat == f and f > 0))
+    all {
+      Mode == "blocking",
+      ck.pc == "idle",
+      nCk < MaxCheckpoints,
+      inflight == Set(),
+      Registered == Set(),
+      Pinned == Set(),
+      gcs.pc == "idle",
+      wal' = newWal,
+      durable' = boundary,
+      nBackfill' = f,
+      db' = DbAfterBackfill(newWal, nBackfill + 1, f),
+      dbMeta' = if (f > nBackfill) newWal[f - 1].meta else dbMeta,
+      backfillFloor' = f,
+      // Every record is at or below durable' because no writer is in flight.
+      llog' = Set(),
+      chain' = collected,
+      ck' = { ...ck, completed: withGc,
+              seen: ck.seen
+                .union(if (left) Set("blockingLeftVersions") else Set())
+                .union(if (b3) Set("b3Drop") else Set())
+                .union(if (stampRan) Set("stampedAtRestart") else Set()) },
+      nCk' = nCk + 1,
+      clock' = clock, inflight' = inflight, lastCommitted' = lastCommitted, rd' = rd,
+      writes' = writes, logged' = logged, err' = err,
+      UnchangedRowVars,
+    }
+  }
+
+  // A pass that stops at CheckpointWal, after its publish: the pager commit
+  // wrote frame F and the publish window stored durable_txid_max, but the WAL
+  // checkpoint returned Busy (a pager reader holds a read mark) or failed. No
+  // backfill, no log truncate, no stamp and no GC.
+  action CheckpointBlockingFail: bool = {
+    val snap = lastCommitted
+    val wset = BlockingWset(snap)
+    val boundary = Max(Set(durable, snap))
+    all {
+      Mode == "blocking",
+      ck.pc == "idle",
+      nCk < MaxCheckpoints,
+      inflight == Set(),
+      Registered == Set(),
+      gcs.pc == "idle",
+      PagerPinsWithoutGate or Pinned == Set(),
+      (PagerPinsWithoutGate and Pinned != Set()) or CheckpointFailures,
+      BlockingWrites(snap),
+      // BlockingFailTruncatesLog (what-if): the log is emptied and the frame never lands.
+      wal' = if (BlockingFailTruncatesLog) wal else wal.append({ w: wset, meta: boundary }),
+      durable' = if (BlockingFailTruncatesLog) durable else boundary,
+      ck' = { ...ck, completed: false, seen: ck.seen.union(Set("blockingFailedPublished")) },
+      nCk' = nCk + 1,
+      llog' = if (BlockingFailTruncatesLog) Set() else llog, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta,
+      backfillFloor' = backfillFloor, chain' = chain,
+      clock' = clock, inflight' = inflight, lastCommitted' = lastCommitted, rd' = rd,
+      writes' = writes, logged' = logged, err' = err,
+      UnchangedRowVars,
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Garbage collection of the version store
 
-  // compute_lwm: the lowest begin timestamp of a registered reader.
-  val Lwm: int = if (Registered == Set()) Inf else Min(Registered.map(r => rd.get(r).b))
+  // compute_lwm: the lowest begin timestamp of a registered reader. The engine also
+  // counts the begin timestamp of a writer that has not finished (its BEGIN
+  // CONCURRENT tick, one below its commit timestamp). The model has that begin only
+  // with WriterBeginTicks, so the trace replay sees the same lwm as the engine.
+  val Lwm: int = Min(Registered.map(r => rd.get(r).b)
+                       .union(if (WriterBeginTicks) inflight.map(i => i.ts - 1) else Set())
+                       .union(Set(Inf)))
 
   // The lowest read mark that GC must respect.
   val GcFloor: int =
@@ -849,9 +1043,59 @@ module MvccPassiveCheckpoint {
 
   // gc_version_chain. Rule 1 drops rolled-back garbage (begin None, end None).
   def GcChain(k: str, lwm: int, floor: int): Set[Version] =
-    val afterRule1 = chain.get(k).filter(v => not(v.b == 0 and v.e == Inf))
-    val afterRule2 = afterRule1.filter(v => not(Rule2(v, lwm, floor)))
-    if (Rule3(afterRule2, lwm, floor)) Set() else afterRule2
+    if (Mode == "blocking") GcChainB(chain.get(k), lwm, durable, floor)
+    else
+      val afterRule1 = chain.get(k).filter(v => not(v.b == 0 and v.e == Inf))
+      val afterRule2 = afterRule1.filter(v => not(Rule2(v, lwm, floor)))
+      if (Rule3(afterRule2, lwm, floor)) Set() else afterRule2
+
+  // Mode B form of the rules (gc_version_chain with passive = false,
+  // mod.rs:8625-8685). ckptMax is durable_txid_max.
+  // has_current counts the versions with a timestamp begin and no end, taken
+  // after Rule 1 (mod.rs:8635-8640).
+  def HasCurrentB(c: Set[Version]): bool =
+    c.exists(x => x.b != 0 and Resolved(x.b) and x.e == Inf)
+
+  // in_btree: the version came from the B-tree (begin None) or began at or
+  // below ckptMax.
+  def InBtreeB(v: Version, ckptMax: int): bool =
+    v.b == 0 or (Resolved(v.b) and v.b <= ckptMax)
+
+  // The keep clause of Rule 2, B form: e > ckpt_max && (in_btree || !has_current).
+  // A guard that is off removes its term. With both terms off the clause is
+  // false.
+  def KeepClauseB(v: Version, ckptMax: int, hasCur: bool): bool = and {
+    GuardB2KeepUncheckpointed,
+    v.e > ckptMax,
+    or {
+      GuardB2InBtree and InBtreeB(v, ckptMax),
+      GuardB2Tombstone and not(hasCur),
+    },
+  }
+
+  def Rule2B(v: Version, c: Set[Version], lwm: int, ckptMax: int, floor: int): bool = and {
+    v.e != Inf, Resolved(v.e), v.e < lwm,
+    not(KeepClauseB(v, ckptMax, HasCurrentB(c))),
+    not(FixB2WaitsForPinned) or Pinned.forall(r => rd.get(r).mark >= wal.length()),
+  }
+
+  def Rule3B(c: Set[Version], lwm: int, ckptMax: int, floor: int): bool = and {
+    c.size() == 1,
+    val v = AnyVersion(c)
+    and {
+      v.e == Inf, v.b != 0, Resolved(v.b),
+      v.mat != 0, v.mat <= floor, lwm == Inf,
+      not(GuardB3InCkptMax) or v.b <= ckptMax,
+    },
+  }
+
+  def AfterRule2B(c: Set[Version], lwm: int, ckptMax: int, floor: int): Set[Version] =
+    val afterRule1 = c.filter(v => not(v.b == 0 and v.e == Inf))
+    afterRule1.filter(v => not(Rule2B(v, afterRule1, lwm, ckptMax, floor)))
+
+  def GcChainB(c: Set[Version], lwm: int, ckptMax: int, floor: int): Set[Version] =
+    if (Rule3B(AfterRule2B(c, lwm, ckptMax, floor), lwm, ckptMax, floor)) Set()
+    else AfterRule2B(c, lwm, ckptMax, floor)
 
   action UnchangedForGc = all {
     clock' = clock, inflight' = inflight, lastCommitted' = lastCommitted, llog' = llog,
@@ -907,6 +1151,10 @@ module MvccPassiveCheckpoint {
 
   def AfterGc(k: str, remaining: Set[Version]): CkState = {
     ...ck, seen: ck.seen
+      .union(if (Mode == "blocking") Set("gcDroppedB") else Set())
+      .union(if (Mode == "blocking" and Registered != Set()
+                 and chain.get(k).exclude(remaining).exists(v => v.e != Inf))
+               Set("b2DropWithReader") else Set())
       .union(if (EarlyStampedDrop(k, remaining)) Set("earlyStampGcWithReader") else Set())
       .union(if (EarlyStampedDropAfterFailure(k, remaining)) Set("earlyStampGcAfterFailure") else Set()),
   }
@@ -956,6 +1204,9 @@ module MvccPassiveCheckpoint {
     nondet at = Set("collect", "writing", "committed", "publishing", "published", "backfilled", "truncateDecided", "truncated", "prune", "clear").oneOf()
     CheckpointFail(at),
     CheckpointStart,
+    CheckpointBlocking,
+    CheckpointBlockingStop,
+    CheckpointBlockingFail,
     nondet k = Keys.oneOf()
     CheckpointCollect(k),
     CheckpointBeginPager,
@@ -1057,6 +1308,15 @@ module MvccPassiveCheckpoint {
   val NeverCleanupPublishes: bool = not(ck.seen.contains("cleanupPublished"))
   val NeverGcEarlyStampAfterFailure: bool = not(ck.seen.contains("earlyStampGcAfterFailure"))
   val NeverGcEarlyStampWithReader: bool = not(ck.seen.contains("earlyStampGcWithReader"))
+
+  // Mode B.
+  val BlockingStoreEmpty: bool = not(ck.seen.contains("blockingLeftVersions"))
+  val NeverGcDropsB: bool = not(ck.seen.contains("gcDroppedB"))
+  val NeverFallsThrough: bool = not(ck.seen.contains("fellThrough"))
+  val NeverBlockingDropsSuperseded: bool = not(ck.seen.contains("b2DropWithReader"))
+  val NeverBlockingDropsCurrent: bool = not(ck.seen.contains("b3Drop"))
+  val NeverBlockingFailsAfterPublish: bool = not(ck.seen.contains("blockingFailedPublished"))
+  val NeverStampAtRestart: bool = not(ck.seen.contains("stampedAtRestart"))
 
   val NeverFailsAfterPublish: bool = not(ck.seen.contains("failedPublished"))
   val NeverRepairsVersions: bool = not(ck.seen.contains("repairedVersions"))

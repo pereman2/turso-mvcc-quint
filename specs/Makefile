@@ -40,7 +40,9 @@ CONFIGS = awk '/^\/\/ Expect /{ e = ""; if (match($$0, /Expect [A-Za-z]+ to fail
 # The module name of the main configuration in each configs file.
 MAIN = main
 # The module for `make traces`, if a configs file has it. It is not model
-# checked.
+# checked. `check` and `variants` skip every module whose name starts with mbt
+# (mbt, mbtBlocking). Use `make traces SPECS=MvccPassiveCheckpoint MBT=mbtBlocking`
+# for the mode B traces.
 MBT = mbt
 
 all: check variants
@@ -61,7 +63,7 @@ check variants:
 	  $(CONFIGS) $${spec}Configs.qnt | while IFS='|' read -r mod expect invs; do \
 	    if [ "$(KIND)" = main ] && [ "$$mod" != "$$main" ]; then continue; fi; \
 	    if [ "$(KIND)" = variants ] && [ "$$mod" = "$$main" ]; then continue; fi; \
-	    if [ "$$mod" = "$(MBT)" ]; then continue; fi; \
+	    case "$$mod" in mbt*) continue;; esac; \
 	    if [ -n "$(ONLY)" ] && ! echo " $(ONLY) " | grep -q " $$mod "; then continue; fi; \
 	    name=$$spec-$$mod; start=$$(date +%s); \
 	    out=$$($(QUINT) verify $${spec}Configs.qnt --main $$mod --init Init --step Next \
