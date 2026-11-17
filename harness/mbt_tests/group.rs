@@ -233,6 +233,9 @@ struct Writer {
     acked: bool,
 }
 
+/// Yields in a row with no stop that count as a wait for another commit.
+const YIELD_WAIT: usize = 1000;
+
 /// The promises that a replay checks on the engine, besides conformance.
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct Promises {
@@ -357,6 +360,7 @@ impl GroupDriver {
         let commit = w.commit.as_mut().expect("the COMMIT statement was dropped");
         w.stops.take();
         let mut ios = 0;
+        let mut yields = 0;
         for _ in 0..STEP_LIMIT {
             match commit.step() {
                 Ok(StepResult::Done) => {
@@ -368,6 +372,13 @@ impl GroupDriver {
                         return Ok(stop);
                     }
                     ios = 0;
+                    // A waiter whose ticket waits on another waiter's retry
+                    // cannot park while the lock is free: `park` yields at
+                    // once. It waits all the same, as the spec "await" does.
+                    yields += 1;
+                    if yields >= YIELD_WAIT {
+                        return Ok(EngineStop::Parked);
+                    }
                 }
                 Ok(StepResult::IO) => {
                     ios += 1;
@@ -775,19 +786,27 @@ fn group_traces_from_folder() {
         })
         .collect();
     paths.sort();
-    let (mut done, mut refused) = (0, 0);
+    let (mut done, mut refused, mut failed) = (0, 0, 0);
     for path in &paths {
         let trace = std::fs::read_to_string(path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let mut driver = GroupDriver::new(Promises::default());
-        match replay(&name, &trace, Expect::Conforms, &mut driver) {
-            Replay::Done => {
+        let result = std::panic::catch_unwind(|| {
+            let mut driver = GroupDriver::new(Promises::default());
+            replay(&name, &trace, Expect::Conforms, &mut driver)
+        });
+        match result {
+            Ok(Replay::Done) => {
                 done += 1;
                 let events = seen_events(&trace);
                 println!("{name}: replayed, events {events:?}");
             }
-            Replay::Refused => refused += 1,
+            Ok(Replay::Refused) => refused += 1,
+            Err(_) => failed += 1,
         }
     }
-    println!("{done} traces replayed, {refused} refused");
+    println!(
+        "{} traces: {done} replayed, {refused} refused, {failed} failed",
+        paths.len()
+    );
+    assert_eq!(failed, 0);
 }
