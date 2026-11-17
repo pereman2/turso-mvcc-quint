@@ -1,0 +1,389 @@
+diff --git a/core/mvcc/database/group_commit_sync_mode_tests.rs b/core/mvcc/database/group_commit_sync_mode_tests.rs
+index e81d7a442..ce7686c42 100644
+--- a/core/mvcc/database/group_commit_sync_mode_tests.rs
++++ b/core/mvcc/database/group_commit_sync_mode_tests.rs
+@@ -7,6 +7,311 @@ use crate::{
+ };
+ use std::sync::Arc;
+ 
++// Reproducers for FINDINGS rows 21 and 22 of pereman2/turso-mvcc-quint.
++
++use super::{get_rows, FixedYieldInjector};
++use crate::mvcc::database::race_hooks::{self, RaceHook};
++use crate::mvcc::database::CommitYieldPoint;
++use crate::mvcc::yield_hooks::YieldPointMarker;
++use crate::Connection;
++use std::cell::RefCell;
++use std::collections::BTreeMap;
++use std::rc::Rc;
++use std::sync::Mutex as StdMutex;
++
++/// The bytes of one file as the OS shows them, and as of the last fsync.
++#[derive(Default)]
++struct Shadow {
++    current: Vec<u8>,
++    durable: Vec<u8>,
++}
++
++fn apply(shadow: &StdMutex<Shadow>, pos: u64, data: &[u8]) {
++    let mut s = shadow.lock().unwrap();
++    let end = pos as usize + data.len();
++    if s.current.len() < end {
++        s.current.resize(end, 0);
++    }
++    s.current[pos as usize..end].copy_from_slice(data);
++}
++
++/// A `MemoryIO` that keeps the fsynced bytes of each file, so that a test
++/// can open the files as a power loss leaves them.
++#[derive(Default)]
++struct FaultIo {
++    inner: MemoryIO,
++    files: StdMutex<BTreeMap<String, Arc<StdMutex<Shadow>>>>,
++}
++
++impl FaultIo {
++    fn mark_all_durable(&self) {
++        for shadow in self.files.lock().unwrap().values() {
++            let mut s = shadow.lock().unwrap();
++            s.durable = s.current.clone();
++        }
++    }
++
++    /// The files as a process crash (`false`) or a power loss (`true`)
++    /// leaves them.
++    fn snapshot(&self, power_loss: bool) -> BTreeMap<String, Vec<u8>> {
++        self.files
++            .lock()
++            .unwrap()
++            .iter()
++            .map(|(path, shadow)| {
++                let s = shadow.lock().unwrap();
++                let bytes = if power_loss { &s.durable } else { &s.current };
++                (path.clone(), bytes.clone())
++            })
++            .collect()
++    }
++}
++
++impl Clock for FaultIo {
++    fn current_time_monotonic(&self) -> MonotonicInstant {
++        self.inner.current_time_monotonic()
++    }
++    fn current_time_wall_clock(&self) -> WallClockInstant {
++        self.inner.current_time_wall_clock()
++    }
++}
++
++impl IO for FaultIo {
++    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Arc<dyn File>> {
++        let inner = self.inner.open_file(path, flags, direct)?;
++        let shadow = self
++            .files
++            .lock()
++            .unwrap()
++            .entry(path.to_string())
++            .or_default()
++            .clone();
++        Ok(Arc::new(FaultFile { inner, shadow }))
++    }
++    fn remove_file(&self, path: &str) -> Result<()> {
++        self.files.lock().unwrap().remove(path);
++        self.inner.remove_file(path)
++    }
++    fn file_id(&self, path: &str) -> Result<FileId> {
++        self.inner.file_id(path)
++    }
++}
++
++struct FaultFile {
++    inner: Arc<dyn File>,
++    shadow: Arc<StdMutex<Shadow>>,
++}
++
++impl File for FaultFile {
++    fn lock_file(&self, exclusive: bool) -> Result<()> {
++        self.inner.lock_file(exclusive)
++    }
++    fn unlock_file(&self) -> Result<()> {
++        self.inner.unlock_file()
++    }
++    fn pread(&self, pos: u64, c: Completion) -> Result<Completion> {
++        self.inner.pread(pos, c)
++    }
++    fn pwrite(&self, pos: u64, buffer: Arc<Buffer>, c: Completion) -> Result<Completion> {
++        apply(&self.shadow, pos, buffer.as_slice());
++        self.inner.pwrite(pos, buffer, c)
++    }
++    fn sync(&self, c: Completion, sync_type: FileSyncType) -> Result<Completion> {
++        {
++            let mut s = self.shadow.lock().unwrap();
++            s.durable = s.current.clone();
++        }
++        self.inner.sync(c, sync_type)
++    }
++    fn size(&self) -> Result<u64> {
++        self.inner.size()
++    }
++    fn truncate(&self, len: u64, c: Completion) -> Result<Completion> {
++        self.shadow.lock().unwrap().current.truncate(len as usize);
++        self.inner.truncate(len, c)
++    }
++}
++
++fn open_fault_db(path: &str) -> (Arc<Database>, Arc<FaultIo>) {
++    let io = Arc::new(FaultIo::default());
++    let db = Database::open_file(io.clone(), path, Arc::new(EngineDialect)).unwrap();
++    let setup = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    for sql in [
++        "PRAGMA journal_mode = 'mvcc'",
++        "CREATE TABLE t(pk INTEGER PRIMARY KEY, v INTEGER)",
++        "PRAGMA mvcc_checkpoint_threshold = -1",
++    ] {
++        setup.execute(sql).unwrap();
++    }
++    io.mark_all_durable();
++    (db, io)
++}
++
++fn writer(db: &Arc<Database>, pk: i64) -> Arc<Connection> {
++    let conn = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    conn.set_sync_mode(SyncMode::Full);
++    conn.execute("BEGIN CONCURRENT").unwrap();
++    conn.execute(format!("INSERT INTO t VALUES ({pk}, 1)"))
++        .unwrap();
++    conn
++}
++
++fn pks(conn: &Arc<Connection>) -> Vec<i64> {
++    get_rows(conn, "SELECT pk FROM t ORDER BY pk")
++        .iter()
++        .map(|row| row[0].as_int().unwrap())
++        .collect()
++}
++
++/// Opens a copy of `files` as a restart after a crash leaves them, and reads `t`.
++fn recover(files: &BTreeMap<String, Vec<u8>>, db_path: &str) -> Vec<i64> {
++    let dir = tempfile::TempDir::new().unwrap();
++    for (path, bytes) in files {
++        if !path.ends_with("-tshm") {
++            std::fs::write(dir.path().join(path), bytes).unwrap();
++        }
++    }
++    let io = Arc::new(crate::io::PlatformIO::new().unwrap());
++    let path = dir.path().join(db_path);
++    let db = Database::open_file(io, path.to_str().unwrap(), Arc::new(EngineDialect)).unwrap();
++    pks(&db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap())
++}
++
++fn step_to_yield(stmt: &mut Statement) {
++    for _ in 0..10_000 {
++        match stmt.step().unwrap() {
++            StepResult::Yield => return,
++            StepResult::IO => continue,
++            other => panic!("expected a yield, got {other:?}"),
++        }
++    }
++    panic!("statement never yielded")
++}
++
++/// Parks `b` then `a` on the held commit lock, so that `a` leads a batch
++/// whose first record is `b`'s.
++fn park_b_then_a(db: &Arc<Database>, commit_a: &mut Statement, commit_b: &mut Statement) {
++    let store = db.get_mv_store().clone().unwrap();
++    assert!(store.commit_coordinator.pager_commit_lock.write());
++    assert!(matches!(commit_b.step().unwrap(), StepResult::IO));
++    assert!(matches!(commit_a.step().unwrap(), StepResult::IO));
++    store.commit_coordinator.unlock_pager_commit_lock();
++}
++
++/// Row 21: a FULL COMMIT drops after its record is written and before the
++/// fsync. Cleanup makes it Committed, a reader sees it, and a power loss
++/// loses it.
++#[test]
++fn dropped_full_commit_seen_by_reader_survives_power_loss() {
++    let (db, io) = open_fault_db("row21.db");
++    let conn = writer(&db, 1);
++    conn.set_yield_injector(Some(FixedYieldInjector::new([
++        CommitYieldPoint::LogRecordMarkedWritten.point(),
++    ])));
++    {
++        let mut commit = conn.prepare("COMMIT").unwrap();
++        step_to_yield(&mut commit);
++    }
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let seen = pks(&reader);
++    let after_power_loss = recover(&io.snapshot(true), "row21.db");
++    println!("reader sees {seen:?}, a power loss recovers {after_power_loss:?}");
++    assert_eq!(seen, vec![1], "the reader sees the dropped commit");
++    assert_eq!(
++        after_power_loss, seen,
++        "a row that a reader saw must survive a power loss"
++    );
++}
++
++/// Row 22, first window: waiter `b` drops between the leader's check that
++/// `b` is still in `txs` and its `log_tx`. `b` rolls back, the leader still
++/// writes and advances `b`'s frame, and a restart brings `b` back.
++#[test]
++fn waiter_dropped_between_owner_check_and_log_tx_stays_rolled_back() {
++    let (db, io) = open_fault_db("row22a.db");
++    let conn_a = writer(&db, 1);
++    let conn_b = writer(&db, 2);
++    let mut commit_a = conn_a.prepare("COMMIT").unwrap();
++    let mut commit_b = conn_b.prepare("COMMIT").unwrap();
++    park_b_then_a(&db, &mut commit_a, &mut commit_b);
++    race_hooks::set(RaceHook::BeforeLogTx, move || drop(commit_b));
++    loop {
++        match commit_a.step().unwrap() {
++            StepResult::Done => break,
++            StepResult::IO | StepResult::Yield => continue,
++            other => panic!("leader COMMIT gave {other:?}"),
++        }
++    }
++    assert!(!race_hooks::pending(), "the hook did not fire");
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let before = pks(&reader);
++    let after_restart = recover(&io.snapshot(false), "row22a.db");
++    println!("rows before restart {before:?}, after restart {after_restart:?}");
++    assert_eq!(before, vec![1]);
++    assert_eq!(after_restart, before, "a restart must not bring back b");
++}
++
++/// Row 22, second window: waiter `b` drops and reads `log_appended` as false.
++/// Before its `abandon_if_issued`, the leader marks `b`'s record written and
++/// clears `issued`. `b` then rolls back with its frame advanced in the log.
++#[test]
++fn waiter_dropped_while_leader_marks_its_record_stays_rolled_back() {
++    let (db, io) = open_fault_db("row22b.db");
++    let conn_a = writer(&db, 1);
++    let conn_b = writer(&db, 2);
++    let commit_a = Rc::new(RefCell::new(conn_a.prepare("COMMIT").unwrap()));
++    let mut commit_b = conn_b.prepare("COMMIT").unwrap();
++    park_b_then_a(&db, &mut commit_a.borrow_mut(), &mut commit_b);
++    conn_a.set_yield_injector(Some(FixedYieldInjector::new([
++        CommitYieldPoint::LogicalLogWriteIssued.point(),
++    ])));
++    step_to_yield(&mut commit_a.borrow_mut());
++    let leader = commit_a.clone();
++    let leader_done = Rc::new(std::cell::Cell::new(false));
++    let done = leader_done.clone();
++    race_hooks::set(RaceHook::BeforeAbandonIfIssued, move || {
++        let mut stmt = leader.borrow_mut();
++        for _ in 0..10_000 {
++            match stmt.step().unwrap() {
++                StepResult::Yield => return,
++                StepResult::Done => {
++                    done.set(true);
++                    return;
++                }
++                _ => continue,
++            }
++        }
++        panic!("leader did not stop");
++    });
++    drop(commit_b);
++    assert!(!race_hooks::pending(), "the hook did not fire");
++    while !leader_done.get() {
++        match commit_a.borrow_mut().step().unwrap() {
++            StepResult::Done => leader_done.set(true),
++            StepResult::IO | StepResult::Yield => continue,
++            other => panic!("leader COMMIT gave {other:?}"),
++        }
++    }
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let before = pks(&reader);
++    let after_restart = recover(&io.snapshot(false), "row22b.db");
++    println!("rows before restart {before:?}, after restart {after_restart:?}");
++    assert_eq!(before, vec![1]);
++    assert_eq!(after_restart, before, "a restart must not bring back b");
++}
++
+ #[test]
+ fn full_waiter_is_synced_when_group_leader_uses_sync_off() {
+     let (_db, io, [mut leader, mut waiter]) =
+diff --git a/core/mvcc/database/mod.rs b/core/mvcc/database/mod.rs
+index ae3d584aa..954a59459 100644
+--- a/core/mvcc/database/mod.rs
++++ b/core/mvcc/database/mod.rs
+@@ -3491,6 +3491,8 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> StateTransition for CommitStat
+                         self.advance_group_or_sync(end_ts, mvcc_store.logical_log_allocator());
+                     return Ok(TransitionResult::Continue);
+                 }
++                #[cfg(test)]
++                race_hooks::fire(race_hooks::RaceHook::BeforeLogTx);
+                 let (c, append_bytes) = mvcc_store.storage.log_tx(log_record, None)?;
+                 if let Some(batch) = self.group_batch.as_ref() {
+                     self.commit_coordinator
+@@ -7323,6 +7325,8 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> MvStore<Clock, A> {
+         });
+         match tx_state {
+             Some(TransactionState::Active | TransactionState::Preparing(_)) => {
++                #[cfg(test)]
++                race_hooks::fire(race_hooks::RaceHook::BeforeAbandonIfIssued);
+                 if self.commit_coordinator.abandon_if_issued(tx_id) {
+                     if connection.get_mv_tx_id_for_db(db_id) == Some(tx_id) {
+                         connection.set_mv_tx_for_db(db_id, None);
+@@ -11518,3 +11522,50 @@ impl Ord for RowID {
+         }
+     }
+ }
++
++/// Test-only hooks that run another connection's code inside a window that
++/// has no yield point, to reproduce races between threads.
++#[cfg(test)]
++pub(crate) mod race_hooks {
++    use std::cell::RefCell;
++
++    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
++    pub(crate) enum RaceHook {
++        /// After the leader checks that a batch record's tx is in `txs`,
++        /// before `log_tx`.
++        BeforeLogTx,
++        /// In `cleanup_dropped_commit`, after the state read, before
++        /// `abandon_if_issued`.
++        BeforeAbandonIfIssued,
++    }
++
++    type Hook = (RaceHook, Box<dyn FnOnce()>);
++
++    thread_local! {
++        static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
++    }
++
++    pub(crate) fn set(at: RaceHook, f: impl FnOnce() + 'static) {
++        HOOK.with(|h| *h.borrow_mut() = Some((at, Box::new(f))));
++    }
++
++    pub(crate) fn pending() -> bool {
++        HOOK.with(|h| h.borrow().is_some())
++    }
++
++    pub(crate) fn fire(at: RaceHook) {
++        let f = HOOK.with(|h| {
++            let mut h = h.borrow_mut();
++            match h.take() {
++                Some((p, f)) if p == at => Some(f),
++                other => {
++                    *h = other;
++                    None
++                }
++            }
++        });
++        if let Some(f) = f {
++            f();
++        }
++    }
++}
