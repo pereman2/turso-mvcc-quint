@@ -71,7 +71,7 @@ means that it runs in B but nothing in B needs it.
 | `BuildLogRecord` and `canonical_log_id` | mod.rs:2458-2470 | B, P, T (no gate) | Schema spec (ids, `FixPersistIds`) | Design today. SIMPLIFY step 3 removes it |
 | `MarkDirtyKeys` | mod.rs:2728, `step_mark_dirty_keys` mod.rs:2737, `mark_tx_write_set_dirty` mod.rs:7905, `mark_checkpoint_dirty_key` mod.rs:7861 | B, P, T (no gate) | Row spec `WriteMarkDirty`, `WriteLateMark` (`DirtyKeys = TRUE`) | Optimization (replaces a walk of the whole version store). Dead in B, see section 2 |
 | Logical log append and fsync | mod.rs:3408-3586 | B, P, T | Row spec `WriteLogAppend` (one atomic step) | Design |
-| Group commit (`AwaitGroupCommit`, `SyncGroupPrefix`, `GroupPrefixSynced`) | mod.rs:1449, mod.rs:3448, mod.rs:3558, mod.rs:3572, `group_commit.rs` | B, P, T (`group_commit_enabled`) | Not modeled | Optimization (replaces one fsync per commit) |
+| Group commit (`AwaitGroupCommit`, `SyncGroupPrefix`, `GroupPrefixSynced`) | mod.rs:1449, mod.rs:3448, mod.rs:3558, mod.rs:3572, `group_commit.rs` | B, P, T (`group_commit_enabled`) | `MvccGroupCommit.qnt` (no checkpoint, no readers) | Optimization (replaces one fsync per commit) |
 | `CommitEnd`, `publish_committed_tx` | mod.rs:3629, mod.rs:3677, mod.rs:7346 | B, P, T | Row spec `WriteFinish`. Schema spec `DdlFinish` for the header | Design |
 | TxID to timestamp rewrite | `rewrite_live_versions_for_committed_tx` mod.rs:7383 | B, P, T | Not modeled (the model stores timestamps) | Optimization (replaces a lookup of the tx state on each read) |
 | `finalized_tx_states` insert at `remove_tx` | mod.rs:6829-6835, mod.rs:6871 | B, P, T | Not modeled | Design (TxID resolution after the tx leaves `txs`) |
@@ -81,7 +81,7 @@ means that it runs in B but nothing in B needs it.
 | Rollback | `rollback_tx_inner` mod.rs:7144, `rollback_version_chain` mod.rs:7264 | B, P, T | Row spec `WriteAbort` (Preparing only) | Design |
 | Rollback resets `materialized_at` | `set_end(None)` mod.rs:7273, mod.rs:10997 | B, P, T | Row spec `AbortKeepsMaterialized` | Leak (DESIGN-rows finding 1) |
 | Rollback unmarks dirty keys | mod.rs:7209, `unmark_checkpoint_dirty_key_if_stamp` mod.rs:7883 | B, P, T (no gate) | Row spec `WriteAbort` with `DirtyKeys` | Optimization bookkeeping. Dead in B |
-| `cleanup_dropped_commit` (abort after log append counts as commit) | mod.rs:7292 | B, P, T | Not modeled | Design |
+| `cleanup_dropped_commit` (abort after log append counts as commit) | mod.rs:7292 | B, P, T | `MvccGroupCommit.qnt` `Drop` and `DropFinish` (group path only, no readers) | Design |
 | Exclusive tx and commit lock | mod.rs:7400, mod.rs:7673, mod.rs:7713 | B, P, T | Not modeled (only its cookie effect, schema S8) | Design |
 
 ### Begin and read path
@@ -232,9 +232,9 @@ mark), not the lock.
 5. Index rows are not in any spec. They have their own GC loop (mod.rs:8348), their own dirty map and the lockstep cursor (cursor.rs:524). A correct table with a wrong index still gives wrong query results.
 6. `finalized_tx_states` pruning (mod.rs:8542) is not modeled. Assume that GC prunes a TxID and a version still names it. Then visibility and conflict checks treat it as "visible" or "no conflict" (comment at mod.rs:6846-6853).
 7. Write-write validation (mod.rs:2071) against a GC that drops versions is not modeled. If GC drops a version, a conflict can stay hidden and an update can get lost.
-8. Group commit and the order of log fsync and `CommitEnd` (mod.rs:3448-3586) are not modeled. This is the durability promise of a commit.
+8. Modeled. `MvccGroupCommit.qnt` models group commit and the order of log fsync and `CommitEnd` (mod.rs:3448-3586), with `DESIGN-group-commit.md`. A FULL commit that returns success is on disk (`AckDurable`), and the main configuration passes with 3 transactions and 4 tickets. Two promises fail in the code today. A dropped COMMIT becomes `Committed` before any fsync (`dropCommitsUnsynced`). A rolled-back transaction comes back after a crash (`dropResurrects`, `FINDINGS.md` row 20). The trace replay (`harness/mbt_tests/group.rs`) follows both on the engine. The spec leaves out readers and commit dependencies, I/O errors, the checkpoint, the non-group path and liveness. `finish_abandoned_group_waiter` removes a transaction without `notify_committed_dependents` (mod.rs:1949). Not verified.
 9. WAL restart (core/storage/wal.rs:5367) and the value of `backfill_floor` across it are not verified (DESIGN-rows "WAL restart").
-10. `cleanup_dropped_commit` (mod.rs:7292) treats an abort after the log append as a commit. Not modeled. It decides whether recovery and readers agree.
+10. `cleanup_dropped_commit` (mod.rs:7292) treats an abort after the log append as a commit. `MvccGroupCommit.qnt` models it on the group path (`Drop`, `DropFinish`), with no readers. A dropped COMMIT becomes `Committed` before any fsync (`dropCommitsUnsynced`). The non-group path and the agreement of readers with recovery are not modeled.
 11. Reads of `sqlite_schema` through the dual cursor and GC of its versions (#8093, #8094) are not modeled (DESIGN-schema "Not modeled").
 12. The sync object map and stable table ids are not modeled (SYNC.md).
 13. The rowid allocator cache is dropped with retired bindings (mod.rs:4880). Not modeled. A wrong cache can reuse a rowid.
