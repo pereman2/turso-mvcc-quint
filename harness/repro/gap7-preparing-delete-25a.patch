@@ -1,0 +1,113 @@
+diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
+index a94c7f72f..9416b56bf 100644
+--- a/core/mvcc/database/tests.rs
++++ b/core/mvcc/database/tests.rs
+@@ -5378,3 +5378,108 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+         TursoAllocator,
+     )
+ }
++
++/// Steps a statement to the end. It runs the IO loop on `IO` and steps again on `Yield`.
++fn step_25a_until_done(stmt: &mut crate::Statement) -> Result<()> {
++    loop {
++        match stmt.step()? {
++            crate::StepResult::Done => return Ok(()),
++            crate::StepResult::IO => stmt._io().step()?,
++            _ => {}
++        }
++    }
++}
++
++/// FINDINGS row 25a. Writer A deletes key 1 and stops in its COMMIT after the
++/// commit check, so A is Preparing with end_ts e. Then B begins with
++/// begin_ts b > e. B does not see key 1 (is_end_visible ignores the delete
++/// speculatively and B takes a commit dependency on A), so B inserts key 1.
++/// Under snapshot isolation B may commit once A commits: A's delete is in B's
++/// snapshot and no write of key 1 lands in (b, B's commit). Expected: B's
++/// COMMIT waits for A, then commits. Actual: B's commit check sees the old
++/// version (begin Timestamp, end TxID(A) with A Preparing), falls through to
++/// the begin check and returns WriteWriteConflict.
++#[test]
++fn preparing_delete_below_begin_does_not_abort_a_later_insert() {
++    let db = MvccTestDbNoConn::new_with_random_db();
++    let conn_a = db.connect();
++    let conn_b = db.connect();
++    conn_a
++        .execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)")
++        .unwrap();
++    conn_a.execute("INSERT INTO t VALUES (1, 'old')").unwrap();
++
++    conn_a.execute("BEGIN CONCURRENT").unwrap();
++    conn_a.execute("DELETE FROM t WHERE id = 1").unwrap();
++    let tx_a = conn_a.get_mv_tx_id().unwrap();
++    conn_a.set_yield_injector(Some(FixedYieldInjector::new([
++        CommitYieldPoint::WaitForDependencies.point(),
++    ])));
++    let mut commit_a = conn_a.prepare("COMMIT").unwrap();
++    assert!(matches!(commit_a.step().unwrap(), crate::StepResult::Yield));
++
++    let mvcc_store = db.get_mvcc_store();
++    let a_end_ts = match mvcc_store.txs.get(&tx_a).unwrap().value().state.load() {
++        TransactionState::Preparing(ts) => ts,
++        other => panic!("A should be Preparing, got {other:?}"),
++    };
++
++    conn_b.execute("BEGIN CONCURRENT").unwrap();
++    let rows = get_rows(&conn_b, "SELECT id FROM t WHERE id = 1");
++    assert!(rows.is_empty(), "B must not see the row that A deletes");
++    let tx_b = conn_b.get_mv_tx_id().unwrap();
++    let b_begin_ts = mvcc_store.txs.get(&tx_b).unwrap().value().begin_ts;
++    assert!(b_begin_ts > a_end_ts, "B must begin after A's end_ts");
++    conn_b.execute("INSERT INTO t VALUES (1, 'new')").unwrap();
++
++    let mut commit_b = conn_b.prepare("COMMIT").unwrap();
++    // B has a commit dependency on A, so its COMMIT must wait, not fail.
++    let first = commit_b.step();
++    let b_result = match first {
++        Err(e) => Err(e),
++        Ok(crate::StepResult::Done) => Ok(()),
++        Ok(_) => {
++            step_25a_until_done(&mut commit_a).unwrap();
++            step_25a_until_done(&mut commit_b)
++        }
++    };
++    let a_state = mvcc_store.txs.get(&tx_a).map(|e| e.value().state.load());
++    assert!(
++        b_result.is_ok(),
++        "B's COMMIT failed while A was {a_state:?} (A end_ts {a_end_ts}, B begin_ts {b_begin_ts}): {b_result:?}"
++    );
++    let rows = get_rows(&conn_a, "SELECT id, v FROM t");
++    assert_eq!(rows.len(), 1);
++    assert_eq!(rows[0][1].to_string(), "new");
++}
++
++/// Control for row 25a: the same steps, but A finishes its COMMIT before B's
++/// COMMIT. B then commits. This shows the conflict above comes only from A
++/// being Preparing at B's commit check.
++#[test]
++fn preparing_delete_below_begin_control_after_writer_commits() {
++    let db = MvccTestDbNoConn::new_with_random_db();
++    let conn_a = db.connect();
++    let conn_b = db.connect();
++    conn_a
++        .execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)")
++        .unwrap();
++    conn_a.execute("INSERT INTO t VALUES (1, 'old')").unwrap();
++
++    conn_a.execute("BEGIN CONCURRENT").unwrap();
++    conn_a.execute("DELETE FROM t WHERE id = 1").unwrap();
++    conn_a.set_yield_injector(Some(FixedYieldInjector::new([
++        CommitYieldPoint::WaitForDependencies.point(),
++    ])));
++    let mut commit_a = conn_a.prepare("COMMIT").unwrap();
++    assert!(matches!(commit_a.step().unwrap(), crate::StepResult::Yield));
++
++    conn_b.execute("BEGIN CONCURRENT").unwrap();
++    conn_b.execute("INSERT INTO t VALUES (1, 'new')").unwrap();
++    step_25a_until_done(&mut commit_a).unwrap();
++    let mut commit_b = conn_b.prepare("COMMIT").unwrap();
++    step_25a_until_done(&mut commit_b).unwrap();
++    let rows = get_rows(&conn_a, "SELECT id, v FROM t");
++    assert_eq!(rows.len(), 1);
++    assert_eq!(rows[0][1].to_string(), "new");
++}

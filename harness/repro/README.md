@@ -132,3 +132,34 @@ cargo test -p turso_core --lib rewrite_window_keeps_checkpoint_stamps -- --nocap
 ```
 
 The group commit test and the out of order test failed in 3 of 3 runs each, with 76 versions left each time.
+
+## gap7-preparing-delete-25a.patch
+
+The patch applies to turso main at `9cf2de2d8`. It adds two tests to
+`core/mvcc/database/tests.rs` for row 25a. They change no engine code. They
+use turso's own yield hook `Connection::set_yield_injector`
+(`#[cfg(any(test, injected_yields))]`) to stop A's COMMIT at
+`WaitForDependencies`, so A stays Preparing.
+
+| Test | Expected | Actual on 9cf2de2d8 |
+|---|---|---|
+| `preparing_delete_below_begin_does_not_abort_a_later_insert` | B's COMMIT waits for A, then both commit and the table holds `(1, 'new')` | B's COMMIT fails with `Err(WriteWriteConflict)` while A is `Preparing(6)` and B began at 7 |
+| `preparing_delete_below_begin_control_after_writer_commits` | B commits after A finished its COMMIT | B commits |
+
+To run the tests, use a turso checkout with no local changes:
+
+```bash
+git -C <turso> checkout 9cf2de2d8
+git -C <turso> apply <this repo>/harness/repro/gap7-preparing-delete-25a.patch
+cd <turso>
+cargo test -p turso_core --lib preparing_delete_below_begin -- --test-threads=1
+```
+
+The first test failed in 10 of 10 runs. The control passed in 10 of 10.
+
+Duplicate search, `gh issue list -R tursodatabase/turso --state all --search`
+on 2026-11-18: "WriteWriteConflict preparing", "WriteWriteConflict preparing
+delete", "write-write conflict commit dependency", "spurious write write
+conflict MVCC", "check_version_conflicts", "mvcc write write conflict" and
+"false conflict BEGIN CONCURRENT delete insert". The nearest issues are #5954,
+#6014 and #6338, with different causes. No duplicate.
