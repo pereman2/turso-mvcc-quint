@@ -251,11 +251,15 @@ cargo test -p turso_core --lib log_fsync_error_tests -- --nocapture --test-threa
 ```
 
 Both tests failed in 3 of 3 runs on `624ed32db`. On 2026-11-18 the patch also
-applied to turso main `3fcfb6fc98` on a clean checkout. The command below ran 3
-times there, and each run gave 0 passed and 2 failed, with the same values.
+applied to clean checkouts of turso main `3fcfb6fc98` and
+`67717af530e693bcbb239cf7a2d9305eceb46d7d`. The command below ran three times
+on `3fcfb6fc98` and once on `67717af53`. Each run gave 0 passed and 2 failed.
+In both tests the reader saw `[1]`, and recovery after a simulated power loss
+returned `[]`. The fsync-error test also reproduced the UNIQUE error on retry.
 
 ```bash
 cargo test -j6 -p turso_core --lib log_fsync_error_tests -- --nocapture --test-threads=1
+```
 
 ## wal-restart-floor.patch
 
