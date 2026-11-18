@@ -26,10 +26,22 @@
  * bytes behind it. The spec assumes that recovery stops there, because those
  * bytes do not chain to the CRC.
  *
- * Not modeled: the non-group path (group commit off, an exclusive
- * transaction), I/O errors, the checkpoint, the log header, readers and
- * commit dependencies. SyncMode OFF acts as NORMAL here, because only FULL
- * forces an fsync (mod.rs:1960).
+ * The non-group path (group commit off, an exclusive transaction) is
+ * modeled for the transactions of DirectTxs (mod.rs:3404). Readers are
+ * modeled as one atomic read and one wait for the commit dependencies
+ * (mod.rs:3330). An fsync error is the Drop at pc "sync".
+ *
+ * FixSyncOnDrop covers the client drop and the test yield. It does not
+ * cover the fsync error of FINDINGS row 30. On Linux a failed fsync can mark
+ * dirty pages clean, so a retry can report success with the frame not on disk
+ * (this is why pager.rs:4788-4796 panics). A real fsync error can lose pages
+ * and break the CRC chain. So for the error case, a later fsync that covers
+ * the frame (coveredLater) is optimistic. The spec does not model that.
+ *
+ * Not modeled: the checkpoint, the log header, a crash as an action (the
+ * invariants use recovered), a write that completes after the COMMIT
+ * returned IO. SyncMode OFF acts as NORMAL here, because only FULL forces an
+ * fsync (mod.rs:1960).
  */
 module MvccGroupCommit {
   const Txs: Set[str]            // Transactions. Each one commits once.
@@ -40,6 +52,12 @@ module MvccGroupCommit {
   // true only for trace replay: a transaction acts only while every other
   // one is at a point where the engine gives control back (field stop).
   const ReplaySegments: bool
+  const DirectTxs: Set[str]      // Transactions on the non-group path. The
+                                 // others of Txs use the group path.
+  const Readers: Set[str]        // Read-only transactions.
+  const FixSyncOnDrop: bool      // Proposed fix: cleanup_dropped_commit fsyncs
+                                 // a record that needs FULL before the
+                                 // transaction becomes Committed.
 
   // Guards of the code. true in the code today.
   const GuardDensePrefix: bool   // dense_prefix_cap (group_commit.rs:322)
@@ -51,6 +69,9 @@ module MvccGroupCommit {
                                  // durable_through (group_commit.rs:252), and
                                  // note_written skips past a hole
                                  // (group_commit.rs:211).
+
+  const GuardDepWait: bool       // ReaderEnd waits until every dependency is
+                                 // notified (mod.rs:3330).
 
   type Frame = { tx: str, ticket: int }
   type LogRec = { tx: str, full: bool }
@@ -67,11 +88,18 @@ module MvccGroupCommit {
   // writing, rest, advanced: the batch (GroupBatch, group_commit.rs:22),
   // advanced is 0 for None.
   // appended: log_appended of the transaction.
+  // notified: notify_committed_dependents ran (mod.rs:3666, mod.rs:7342).
+  // A direct transaction has the pcs "active", "write" (the lock is held),
+  // "issued" (the frame write was issued), "sync", "end", "commitEnd".
   // stop: the engine gives control back to its caller here. A parked
   // commit, a leader after it issued a waiter record or marked its own
   // record, and a finished or dropped statement. Only ReplaySegments reads it.
   type Tx = { pc: str, ticket: int, st: str, appended: bool, led: bool,
-              writing: int, rest: List[int], advanced: int, stop: bool }
+              notified: bool, writing: int, rest: List[int], advanced: int, stop: bool }
+  // pc: "idle", "read", "done", "aborted". saw: the transactions whose rows
+  // the reader sees. deps: the Preparing ones among them. sawGone: the
+  // RolledBack ones.
+  type Reader = { pc: str, saw: Set[str], deps: Set[str], sawGone: Set[str] }
   type Group = { next: int, durable: int, written: int, fullWritten: int,
                  pending: List[int], retry: Set[int], issued: str,
                  abandoned: Set[str] }
@@ -84,6 +112,7 @@ module MvccGroupCommit {
   var unadvanced: Set[Frame]    // empty or one frame
   var disk: List[Frame]
   var acked: Set[str]
+  var rd: str -> Reader
   var seen: Set[str]            // Events, for the reachability checks.
 
   pure val NoFrame: Set[Frame] = Set()
@@ -96,6 +125,12 @@ module MvccGroupCommit {
   // The frames that the OS shows: the log, then the unadvanced frame.
   def fileFrames: List[Frame] =
     unadvanced.fold(log, (l, f) => l.append(f))
+
+  // The transactions that recovery replays after a power loss (the disk) or
+  // after a process crash (the file).
+  def recovered(power: bool): Set[str] =
+    val l = if (power) disk else fileFrames
+    l.indices().map(i => l[i].tx)
 
   // A transaction is in `txs` of the engine: not removed by a rollback or
   // by the end of its commit.
@@ -136,7 +171,8 @@ module MvccGroupCommit {
              retry: Set(), issued: "", abandoned: Set() },
     lock' = "",
     txs' = Txs.mapBy(t => { pc: "active", ticket: 0, st: "Preparing",
-                             appended: false, led: false, writing: 0,
+                             appended: false, led: false, notified: false,
+                             writing: 0,
                              rest: List(), advanced: 0, stop: true }),
     recs' = Map(),
     log' = List(),
@@ -144,12 +180,15 @@ module MvccGroupCommit {
     disk' = List(),
     acked' = Set(),
     seen' = Set(),
+    rd' = Readers.mapBy(r => { pc: "idle", saw: Set(), deps: Set(), sawGone: Set() }),
   }
 
   // BeginCommitLogicalLog, group path (mod.rs:3408, enqueue at
   // group_commit.rs:139). A retry builds the record again and comes back
   // here with a new ticket.
   action Enqueue(t: str): bool = all {
+    rd' = rd,
+    not(DirectTxs.contains(t)),
     txs.get(t).pc == "active",
     grp.next < MaxTicket,
     val tk = grp.next + 1
@@ -168,8 +207,10 @@ module MvccGroupCommit {
   // values that only the lock holder changes. A park changes nothing, so it
   // is no action.
   action Await(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     all {
+      not(DirectTxs.contains(t)),
       x.pc == "await",
       if (grp.durable >= x.ticket) all {
         // Durable: go to EndCommitLogicalLog without the lock. The engine
@@ -216,9 +257,11 @@ module MvccGroupCommit {
   // (mod.rs:3453, mod.rs:3489): a record whose transaction left txs is
   // skipped. Another thread can drop the owner after this check.
   action IssueCheck(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     val owner = recs.get(x.writing).tx
     all {
+      not(DirectTxs.contains(t)),
       x.pc == "upgrade",
       txs' = if (live(owner)) txs.set(t, { ...x, pc: "write", stop: false })
              else txs.set(t, { ...advance(x), stop: false }),
@@ -234,9 +277,11 @@ module MvccGroupCommit {
   // not modeled: after a drop, it can land over the next frame at the same
   // offset.
   action IssueWrite(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     val owner = recs.get(x.writing).tx
     all {
+      not(DirectTxs.contains(t)),
       x.pc == "write",
       txs' = txs.set(t, { ...x, pc: "issued", stop: owner != t }),
       grp' = { ...grp, issued: owner },
@@ -251,6 +296,7 @@ module MvccGroupCommit {
   // frame. An abandoned owner becomes Committed at once
   // (finish_abandoned_group_waiter, mod.rs:1933).
   action MarkWritten(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     val w = x.writing
     val owner = recs.get(w).tx
@@ -263,6 +309,7 @@ module MvccGroupCommit {
                stop: owner == t }
     val o = txs.get(owner)
     all {
+      not(DirectTxs.contains(t)),
       x.pc == "issued",
       grp' = g3,
       log' = log.append({ tx: owner, ticket: w }),
@@ -282,27 +329,40 @@ module MvccGroupCommit {
   def fsync(t: str): List[Frame] =
     if (syncRequired(t)) fileFrames else disk
 
+  // The fsync of t makes a dropped FULL record durable that no fsync covered
+  // before.
+  def coversDropped(t: str): Set[str] =
+    if (syncRequired(t) and Txs.exists(u => txs.get(u).pc == "dropped"
+          and txs.get(u).st == "Committed" and FullTxs.contains(u)
+          and not(hasTx(disk, u)) and hasTx(fileFrames, u)))
+      Set("coveredLater")
+    else Set()
+
   action Sync(t: str): bool = all {
+    rd' = rd,
     txs.get(t).pc == "sync",
     disk' = fsync(t),
     txs' = txs.set(t, { ...txs.get(t), pc: "end", stop: false }),
     seen' = seen.union(
-      if (not(FullTxs.contains(t)) and syncRequired(t)) Set("normalLeaderSyncs") else Set()),
+      if (not(FullTxs.contains(t)) and syncRequired(t)) Set("normalLeaderSyncs") else Set())
+      .union(coversDropped(t)),
     grp' = grp, lock' = lock, recs' = recs, log' = log, unadvanced' = unadvanced,
     acked' = acked,
   }
 
   action SyncPrefix(t: str): bool = all {
+    rd' = rd,
     txs.get(t).pc == "prefix",
     disk' = fsync(t),
     txs' = txs.set(t, { ...txs.get(t), pc: "prefixSynced", stop: false }),
     grp' = grp, lock' = lock, recs' = recs, log' = log, unadvanced' = unadvanced,
-    acked' = acked, seen' = seen,
+    acked' = acked, seen' = seen.union(coversDropped(t)),
   }
 
   // GroupPrefixSynced (mod.rs:3572): mark durable, release the lock, and
   // wait again.
   action PrefixSynced(t: str): bool = all {
+    rd' = rd,
     txs.get(t).pc == "prefixSynced",
     grp' = markDurable(grp, grp.written),
     lock' = "",
@@ -315,6 +375,7 @@ module MvccGroupCommit {
   // That wakes parked waiters, which can finish before this commit is
   // Committed.
   action End(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     all {
       x.pc == "end",
@@ -330,10 +391,12 @@ module MvccGroupCommit {
   // success. A drop in RewriteLiveVersions takes the Committed branch of
   // cleanup_dropped_commit, which gives the same state without the ack.
   action CommitEnd(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     all {
       x.pc == "commitEnd",
-      txs' = txs.set(t, { ...x, pc: "done", st: "Committed", stop: true }),
+      txs' = txs.set(t, { ...x, pc: "done", st: "Committed", notified: true,
+                           stop: true }),
       lock' = if (lock == t) "" else lock,
       acked' = acked.union(Set(t)),
     },
@@ -347,6 +410,7 @@ module MvccGroupCommit {
   // log_appended. A transaction with log_appended becomes Committed. Any
   // other one goes on to DropFinish.
   action Drop(t: str): bool = all {
+    rd' = rd,
     CanDrop,
     not(ReplaySegments) or txs.get(t).stop,
     val x = txs.get(t)
@@ -380,20 +444,25 @@ module MvccGroupCommit {
           "end", "commitEnd").contains(x.pc) or (x.pc == "active" and x.ticket > 0),
       grp' = g2,
       txs' = txs1.set(t,
-        if (toCommitted) { ...x, pc: "dropped", st: "Committed", led: false, stop: true }
+        if (toCommitted)
+          { ...x, pc: "dropped", st: "Committed", led: false, notified: true,
+            stop: true }
         else { ...x, pc: "dropping", led: false, stop: false }),
       lock' = if (lock == t and toCommitted) "" else lock,
+      disk' = if (toCommitted and FixSyncOnDrop and syncRequired(t)) fileFrames else disk,
       seen' = seen
         .union(if (toCommitted) Set("dropCommit") else Set())
+        .union(if (toCommitted and DirectTxs.contains(t)) Set("directDropCommit") else Set())
         .union(if (rollOwner) Set("abandonRollback") else Set()),
     },
-    recs' = recs, log' = log, unadvanced' = unadvanced, disk' = disk, acked' = acked,
+    recs' = recs, log' = log, unadvanced' = unadvanced, acked' = acked,
   }
 
   // The second half of cleanup_dropped_commit: abandon_if_issued
   // (group_commit.rs:275) under the group lock, else rollback_tx_inner,
   // which releases the commit lock.
   action DropFinish(t: str): bool = all {
+    rd' = rd,
     val x = txs.get(t)
     val abandon = grp.issued == t
     all {
@@ -409,12 +478,92 @@ module MvccGroupCommit {
     recs' = recs, log' = log, unadvanced' = unadvanced, disk' = disk, acked' = acked,
   }
 
-  action Next = {
+  // The non-group path. BeginCommitLogicalLog and UpgradeLogicalLogHeader
+  // merged: the lock is taken, and the engine yields while it is busy
+  // (mod.rs:3423). An exclusive transaction holds it from BEGIN, so the
+  // model has more interleavings than the engine.
+  action DirectLock(t: str): bool = all {
+    rd' = rd,
+    DirectTxs.contains(t),
+    txs.get(t).pc == "active",
+    lock == "",
+    lock' = t,
+    txs' = txs.set(t, { ...txs.get(t), pc: "write", stop: false }),
+    grp' = grp, recs' = recs, log' = log, unadvanced' = unadvanced, disk' = disk,
+    acked' = acked, seen' = seen,
+  }
+
+  // log_tx (mod.rs:3498). grp does not change: note_write_issued needs a
+  // batch (mod.rs:3494).
+  action DirectWrite(t: str): bool = all {
+    rd' = rd,
+    DirectTxs.contains(t),
+    txs.get(t).pc == "write",
+    unadvanced' = Set({ tx: t, ticket: 0 }),
+    txs' = txs.set(t, { ...txs.get(t), pc: "issued", stop: false }),
+    grp' = grp, lock' = lock, recs' = recs, log' = log, disk' = disk,
+    acked' = acked, seen' = seen,
+  }
+
+  // MarkLogRecordWritten with no ticket (mod.rs:3525, mod.rs:1902): grp does
+  // not change.
+  action DirectMarkWritten(t: str): bool = all {
+    rd' = rd,
+    DirectTxs.contains(t),
+    txs.get(t).pc == "issued",
+    log' = log.append({ tx: t, ticket: 0 }),
+    unadvanced' = NoFrame,
+    txs' = txs.set(t, { ...txs.get(t), pc: "sync", appended: true, stop: true }),
+    grp' = grp, lock' = lock, recs' = recs, disk' = disk, acked' = acked,
+    seen' = seen,
+  }
+
+  // One step for BEGIN and the scan. A speculative read of a Preparing
+  // version registers a dependency (mod.rs:11057). The engine shows a
+  // Preparing version only when the reader begin_ts is above the writer
+  // end_ts, and the commit sets end_ts when it starts (mod.rs:11057-11068).
+  // So the model counts a Preparing transaction once its commit started. A
+  // retry goes back to "active" with its ticket and keeps its end_ts
+  // (rebuild_log_record, mod.rs:1980-2016).
+  def commitStarted(x: Tx): bool = x.pc != "active" or x.ticket > 0
+
+  action Read(r: str): bool = all {
+    rd.get(r).pc == "idle",
+    rd' = rd.set(r, { pc: "read",
+      saw: Txs.filter(t => txs.get(t).st == "Committed" or
+        (txs.get(t).st == "Preparing" and commitStarted(txs.get(t)))),
+      deps: Txs.filter(t => txs.get(t).st == "Preparing" and commitStarted(txs.get(t))),
+      sawGone: Txs.filter(t => txs.get(t).st == "RolledBack") }),
+    grp' = grp, lock' = lock, txs' = txs, recs' = recs, log' = log,
+    unadvanced' = unadvanced, disk' = disk, acked' = acked, seen' = seen,
+  }
+
+  // WaitForDependencies (mod.rs:3330): a RolledBack dependency aborts the
+  // reader (abort_now), else the reader waits until all notified.
+  action ReaderEnd(r: str): bool = all {
+    val x = rd.get(r)
+    all {
+      x.pc == "read",
+      if (x.deps.exists(d => txs.get(d).st == "RolledBack"))
+        rd' = rd.set(r, { ...x, pc: "aborted" })
+      else all {
+        not(GuardDepWait) or x.deps.forall(d => txs.get(d).notified),
+        rd' = rd.set(r, { ...x, pc: "done" }),
+      },
+    },
+    grp' = grp, lock' = lock, txs' = txs, recs' = recs, log' = log,
+    unadvanced' = unadvanced, disk' = disk, acked' = acked, seen' = seen,
+  }
+
+  action TxStep = {
     nondet t = Txs.oneOf()
     all {
       not(ReplaySegments) or Txs.forall(u => u == t or txs.get(u).stop),
       any {
         Enqueue(t),
+        DirectLock(t),
+        DirectWrite(t),
+        DirectMarkWritten(t),
         Await(t),
         IssueCheck(t),
         IssueWrite(t),
@@ -428,6 +577,19 @@ module MvccGroupCommit {
         DropFinish(t),
       }
     }
+  }
+
+  action ReaderStep = {
+    nondet r = Readers.oneOf()
+    all {
+      not(ReplaySegments) or Txs.forall(u => txs.get(u).stop),
+      any { Read(r), ReaderEnd(r) },
+    }
+  }
+
+  action Next = any {
+    TxStep,
+    all { Readers.size() > 0, ReaderStep },
   }
 
   // Invariants.
@@ -460,6 +622,27 @@ module MvccGroupCommit {
     fileFrames.indices().forall(i => txs.get(fileFrames[i].tx).st != "RolledBack")
     and disk.indices().forall(i => txs.get(disk[i].tx).st != "RolledBack")
 
+  // A reader that finished saw only FULL transactions that a power loss
+  // keeps.
+  val ReadsSurvivePowerLoss =
+    Readers.forall(r => rd.get(r).pc != "done" or
+      rd.get(r).saw.forall(t => not(FullTxs.contains(t)) or recovered(true).contains(t)))
+
+  // A reader that finished saw only transactions that a process crash keeps.
+  val ReadsSurviveCrash =
+    Readers.forall(r => rd.get(r).pc != "done" or
+      rd.get(r).saw.forall(t => recovered(false).contains(t)))
+
+  // A transaction that a finished reader saw as rolled back stays out of
+  // recovery.
+  val RecoveryKeepsReadAborts =
+    Readers.forall(r => rd.get(r).pc != "done" or
+      rd.get(r).sawGone.forall(t =>
+        not(recovered(true).contains(t)) and not(recovered(false).contains(t))))
+
+  val ReadersAgreeWithRecovery =
+    ReadsSurvivePowerLoss and ReadsSurviveCrash and RecoveryKeepsReadAborts
+
   // No transaction has two frames in the log.
   val OneFramePerTx =
     log.indices().forall(i => log.indices().forall(j =>
@@ -477,5 +660,9 @@ module MvccGroupCommit {
   val NeverRollbackWritten = not(seen.contains("rollbackWritten"))
   val NeverAbandonRollback = not(seen.contains("abandonRollback"))
   val NeverSkipDropped = not(seen.contains("skipDropped"))
+  val NeverDirectDropCommit = not(seen.contains("directDropCommit"))
+  val NeverSpeculativeDone =
+    Readers.forall(r => rd.get(r).pc != "done" or rd.get(r).deps.size() == 0)
+  val NeverCoveredLater = not(seen.contains("coveredLater"))
   val NeverAllAcked = acked != Txs
 }

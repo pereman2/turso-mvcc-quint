@@ -14,10 +14,14 @@ module main {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -32,10 +36,14 @@ module mbt {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = true,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -52,10 +60,14 @@ module dropCommitsUnsynced {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -74,10 +86,14 @@ module dropResurrects {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -92,10 +108,14 @@ module noDrop {
     MaxTicket = 4,
     CanDrop = false,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -109,10 +129,14 @@ module noFullSyncWritten {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = false,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -127,10 +151,14 @@ module noDensePrefix {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = false,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -145,10 +173,14 @@ module noRetryHole {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = false
+    GuardRetryHole = false,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -163,10 +195,14 @@ module noRetryBlocksLead {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = false,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -182,10 +218,14 @@ module noHoleGuards {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = false,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = false,
-    GuardRetryHole = false
+    GuardRetryHole = false,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -198,10 +238,14 @@ module reachBatchTwo {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -214,10 +258,14 @@ module reachRetry {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -230,10 +278,14 @@ module reachAbandon {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -246,10 +298,14 @@ module reachAbandonCommit {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -262,10 +318,14 @@ module reachSyncPrefix {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -278,10 +338,14 @@ module reachDropCommit {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -294,10 +358,14 @@ module reachNormalLeaderSyncs {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -310,10 +378,14 @@ module reachWriteRolledBack {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -326,10 +398,14 @@ module reachRollbackWritten {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -342,10 +418,14 @@ module reachAbandonRollback {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -358,10 +438,14 @@ module reachSkipDropped {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
 
@@ -374,9 +458,279 @@ module reachAllAcked {
     MaxTicket = 4,
     CanDrop = true,
     ReplaySegments = false,
+    DirectTxs = Set(),
+    Readers = Set(),
+    FixSyncOnDrop = false,
     GuardDensePrefix = true,
     GuardFullSyncWritten = true,
     GuardRetryBlocksLead = true,
-    GuardRetryHole = true
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect no error: the non-group path with one reader. Two direct commits, a
+// with FULL, b with NORMAL. Each COMMIT statement can drop, which also stands
+// for an fsync error. A reader that finished sees only rows that a process
+// crash keeps. ReadsSurvivePowerLoss and RecoveryKeepsReadAborts fail here:
+// see directDropReadUnsynced and directDropResurrects.
+// Invariants: TypeOK AckDurable AckLogged CommittedLogged OneFramePerTx ReadsSurviveCrash
+module direct {
+  import MvccGroupCommit(
+    Txs = Set("a", "b"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("a", "b"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect no error: as direct without drops. A reader waits for the notify of
+// its dependency, which comes after the fsync of a FULL commit, so a finished
+// reader saw only durable rows of FULL commits. RecoveryKeepsReadAborts is
+// vacuous here: with CanDrop false no transaction rolls back, so sawGone
+// stays empty. The test of the wait is directNoDepWait.
+// Invariants: TypeOK AckDurable AckLogged CommittedLogged OneFramePerTx ReadsSurviveCrash ReadsSurvivePowerLoss RecoveryKeepsReadAborts
+module directNoDrop {
+  import MvccGroupCommit(
+    Txs = Set("a", "b"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = false,
+    ReplaySegments = false,
+    DirectTxs = Set("a", "b"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect ReadsSurvivePowerLoss to fail: a direct FULL commit with no wait of
+// the reader for its dependencies (GuardDepWait false). The reader sees the
+// Preparing row once the commit started and finishes before the fsync. A
+// power loss loses the row. CommittedDurable holds here: see
+// directNoDepWaitDurable. So the failure comes from the reader.
+// Invariants: ReadsSurvivePowerLoss
+module directNoDepWait {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = false,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = false
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect no error: as directNoDepWait. CommittedDurable alone holds, so only
+// the reader wait stands between the Preparing row and a power loss.
+// Invariants: CommittedDurable
+module directNoDepWaitDurable {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = false,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = false
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect ReadsSurvivePowerLoss to fail: a direct FULL commit drops after its
+// record is written. cleanup_dropped_commit makes it Committed and notifies
+// its dependents (mod.rs:7340) before any fsync. A reader finishes and sees
+// the row, and a power loss loses it. An fsync error at mod.rs:3546 takes the
+// same path.
+// Invariants: ReadsSurvivePowerLoss
+module directDropReadUnsynced {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect RecoveryKeepsReadAborts to fail: a direct commit drops after its
+// frame is written but before log_appended is set. The rollback leaves the
+// frame in the file (logical_log.rs:981). A reader sees the transaction as
+// rolled back, and recovery replays it.
+// Invariants: RecoveryKeepsReadAborts
+module directDropResurrects {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set(),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect no error: as directDropReadUnsynced with the proposed fix. The
+// cleanup fsyncs a FULL record before the transaction becomes Committed.
+// Invariants: ReadsSurvivePowerLoss
+module directFixSyncOnDrop {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = true,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect no error: a group commit a and a direct commit b, both FULL, with
+// drops. A later fsync on either path covers a dropped record of the other.
+// Invariants: TypeOK AckDurable AckLogged CommittedLogged OneFramePerTx ReadsSurviveCrash
+module mixed {
+  import MvccGroupCommit(
+    Txs = Set("a", "b"),
+    FullTxs = Set("a", "b"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("b"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect NeverDirectDropCommit to fail: a direct commit drops after its
+// record is written and becomes Committed.
+// Invariants: NeverDirectDropCommit
+module reachDirectDropCommit {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect NeverSpeculativeDone to fail: a reader finishes after it depended on
+// a Preparing transaction.
+// Invariants: NeverSpeculativeDone
+module reachSpeculativeDone {
+  import MvccGroupCommit(
+    Txs = Set("a"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = false,
+    ReplaySegments = false,
+    DirectTxs = Set("a"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// Expect NeverCoveredLater to fail: the fsync of one path covers the dropped
+// FULL record of the other path.
+// Invariants: NeverCoveredLater
+module reachCoveredLater {
+  import MvccGroupCommit(
+    Txs = Set("a", "b"),
+    FullTxs = Set("a", "b"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = false,
+    DirectTxs = Set("b"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
+  ).* from "./MvccGroupCommit"
+}
+
+// The module for make traces of the direct path. As direct, but a transaction
+// acts only where the engine gives control back. It is not model checked.
+// Invariants: TypeOK AckDurable AckLogged CommittedLogged OneFramePerTx ReadsSurviveCrash
+module mbtDirect {
+  import MvccGroupCommit(
+    Txs = Set("a", "b"),
+    FullTxs = Set("a"),
+    MaxTicket = 2,
+    CanDrop = true,
+    ReplaySegments = true,
+    DirectTxs = Set("a", "b"),
+    Readers = Set("r"),
+    FixSyncOnDrop = false,
+    GuardDensePrefix = true,
+    GuardFullSyncWritten = true,
+    GuardRetryBlocksLead = true,
+    GuardRetryHole = true,
+    GuardDepWait = true
   ).* from "./MvccGroupCommit"
 }
