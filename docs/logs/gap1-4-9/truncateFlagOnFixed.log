@@ -1,0 +1,7 @@
+slot 2 Wed Nov 18 12:48:37 CET 2026
+ok   MvccPassiveCheckpoint-truncateFlagOnFixed: no error (300115 states, 18s)
+
+real	0m17.827s
+user	0m35.668s
+sys	0m1.819s
+DONE rc=0 Wed Nov 18 12:48:55 CET 2026

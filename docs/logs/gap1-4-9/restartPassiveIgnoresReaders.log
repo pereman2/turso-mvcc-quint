@@ -1,0 +1,7 @@
+slot 1 Wed Nov 18 12:42:37 CET 2026
+ok   MvccPassiveCheckpoint-restartPassiveIgnoresReaders: NoReaderCrossesRestart fails as expected (333194 states, 22s)
+
+real	0m21.780s
+user	0m33.138s
+sys	0m5.220s
+DONE rc=0 Wed Nov 18 12:42:59 CET 2026

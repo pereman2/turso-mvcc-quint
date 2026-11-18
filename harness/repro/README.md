@@ -256,4 +256,23 @@ times there, and each run gave 0 passed and 2 failed, with the same values.
 
 ```bash
 cargo test -j6 -p turso_core --lib log_fsync_error_tests -- --nocapture --test-threads=1
+
+## wal-restart-floor.patch
+
+The patch applies to turso main at `9cf2de2d8`. It adds three probes to
+`core/mvcc/database/tests.rs` (passive flag on). Each one prints and asserts
+literal values. They pass on main. They check the facts that the row spec
+`ModelWalRestart` relies on (gaps 1, 4, 9).
+
+| Test | Gap | Expected and actual on 9cf2de2d8 |
+|---|---|---|
+| `probe_t_pager_pin_before_pass_busy` | 4 | A pager pin with no MVCC tx, then `PRAGMA wal_checkpoint(TRUNCATE)`: `Err(Busy)`, and a later read gives `b` |
+| `probe_t_r5_reader_after_restart` | 9 | After a T checkpoint the WAL position is `(s+1, 0)` (`(3, 0)` to `(4, 0)`). A reader that pins then has `rows_versions = 0` and reads `b` |
+| `probe_p_restart_blocked_by_db_file_reader` | 1 | Four passive checkpoints with a database file reader open: sequence stays 2. The reader makes the backfill fail on read lock 0 (wal.rs:2221), so condition 4 of wal.rs:5367 keeps the restart off. The single-reader upgrade rule (wal.rs:371) is shown by code reading only. The same rounds with no reader: 2, 3, 4, 5 |
+
+```bash
+git -C <turso> checkout 9cf2de2d8
+git -C <turso> apply <this repo>/harness/repro/wal-restart-floor.patch
+cd <turso>
+cargo test -p turso_core --lib probe_ -- --nocapture --test-threads=1
 ```

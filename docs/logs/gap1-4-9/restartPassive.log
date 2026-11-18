@@ -1,0 +1,7 @@
+slot 2 Wed Nov 18 12:51:38 CET 2026
+ok   MvccPassiveCheckpoint-restartPassive: no error (22042689 states, 838s)
+
+real	13m58.861s
+user	45m20.639s
+sys	3m41.097s
+DONE rc=0 Wed Nov 18 13:05:36 CET 2026

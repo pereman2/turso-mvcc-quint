@@ -1,0 +1,7 @@
+slot 1 Wed Nov 18 11:44:32 CET 2026
+ok   MvccPassiveCheckpoint-reachRestartPassive: NeverReadAfterRestart fails as expected (5767332 states, 342s)
+
+real	5m41.345s
+user	7m57.615s
+sys	6m7.587s
+DONE rc=0 Wed Nov 18 11:50:14 CET 2026

@@ -74,6 +74,8 @@ pub(super) struct RowDriver {
     frames_before_seq: BTreeMap<u32, u64>,
     /// Checkpoint sequence and max frame of the WAL at the last look.
     last_wal: (u32, u64),
+    /// The spec `walSeq` at the last `CheckpointBeginPager`.
+    spec_seq: i64,
     /// Mode B: the passive checkpoint flag is off, and a pass is one spec step.
     blocking: bool,
     /// Readers use `BEGIN CONCURRENT` and can run `ReaderUpdate`.
@@ -215,6 +217,7 @@ impl RowDriver {
             frames: Vec::new(),
             frames_before_seq: BTreeMap::new(),
             last_wal: (0, 0),
+            spec_seq: 0,
             blocking,
             updates,
         };
@@ -841,6 +844,29 @@ impl RowDriver {
     /// The engine begins the pager transaction after the collection. A pass
     /// with nothing to write skips the pager commit and the publish.
     fn checkpoint_begin_pager(&mut self, step: &Step) -> StepOutcome {
+        let seq_before = self.wal_position().0;
+        let outcome = self.begin_pager_step(step);
+        // The restart for write: the engine sequence changed iff the spec `walSeq` did.
+        // Traces from before ModelWalRestart have no `walSeq`.
+        if outcome.is_ok() {
+            if let Some(spec_seq) = step.vars.get("walSeq").map(|v| v.int()) {
+                let spec_restarted = spec_seq != self.spec_seq;
+                let engine_restarted = self.wal_position().0 != seq_before;
+                self.spec_seq = spec_seq;
+                if spec_restarted != engine_restarted {
+                    return fail(
+                        Failure::Frame,
+                        format!(
+                            "spec restarted the WAL: {spec_restarted}, engine: {engine_restarted}"
+                        ),
+                    );
+                }
+            }
+        }
+        outcome
+    }
+
+    fn begin_pager_step(&mut self, step: &Step) -> StepOutcome {
         match step.var("ck").field("pc").str() {
             "writing" => self.ck.step_until(|state| {
                 !matches!(

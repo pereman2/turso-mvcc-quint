@@ -1,0 +1,58 @@
+slot 2 Wed Nov 18 12:44:43 CET 2026
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_locale v2.2.0
+   Compiling icu_collator v2.2.0
+warning: unused import: `HashMap`
+ --> core/vdbe/statement_lifecycle_tests.rs:2:24
+  |
+2 | use std::collections::{HashMap, HashSet};
+  |                        ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: `turso_core` (lib test) generated 1 warning (run `cargo fix --lib -p turso_core --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 56.24s
+     Running unittests lib.rs (target/debug/deps/turso_core-aa8907ae37609a61)
+
+running 1 test
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmp32V3U2/test_1769688693591530628
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpY1sqIJ/test_14995180085375585824
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpk4WqxR/test_7768204108521084137
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpzxBy54/test_6507408793922597893
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpg7qkbE/test_11407443673733096464
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmp7INKqg/test_9188759221738834082
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpkLwFcA/test_15664375205295645008
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpmRzPsp/test_4178210394826329058
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpGAPfPj/test_15849469186624428656
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpn3kcJX/test_5161247933603631742
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpvOpiNe/test_4386574060152357819
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpq3B18m/test_8854439695550726952
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpVndoyH/test_4264982753261703929
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpcNg1KK/test_17154897240992549521
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpdRPAoz/test_9956623481895551061
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmphYkXFH/test_6464722990709231139
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmppOVr0P/test_266093234910973343
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmp03uLNX/test_9318571979889586732
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpTPksXM/test_5411971116929471810
+19 traces: 19 replayed, 0 refused, 0 failed
+test mvcc::database::tests::mbt_tests::rows::row_traces_from_folder ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2603 filtered out; finished in 1.90s
+
+===REGRESSION
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.61s
+     Running unittests lib.rs (target/debug/deps/turso_core-aa8907ae37609a61)
+
+running 8 tests
+test mvcc::database::tests::mbt_tests::rows::blocking_row_traces_from_folder ... ignored
+test mvcc::database::tests::mbt_tests::rows::row_traces_from_folder ... ignored
+test mvcc::database::tests::mbt_tests::rows::blocking_no_b2_keep_trace_fails_the_chain_check ... ok
+test mvcc::database::tests::mbt_tests::rows::blocking_pager_pin_trace_shows_wrong_read ... ok
+test mvcc::database::tests::mbt_tests::rows::hand_written_row_trace_conforms ... ok
+test mvcc::database::tests::mbt_tests::rows::update_witness_traces_conform ... ok
+test mvcc::database::tests::mbt_tests::rows::generated_blocking_row_traces_conform ... ok
+test mvcc::database::tests::mbt_tests::rows::generated_row_traces_conform ... ok
+
+test result: ok. 6 passed; 0 failed; 2 ignored; 0 measured; 2596 filtered out; finished in 0.74s
+
+DONE rc=0 Wed Nov 18 12:45:53 CET 2026

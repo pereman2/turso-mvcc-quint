@@ -1,0 +1,118 @@
+diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
+index a94c7f72f..85df62f96 100644
+--- a/core/mvcc/database/tests.rs
++++ b/core/mvcc/database/tests.rs
+@@ -5378,3 +5378,113 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+         TursoAllocator,
+     )
+ }
++// Probes for gaps 1, 4 and 9 (WAL restart and the T final sweep, passive flag on).
++// Append to core/mvcc/database/tests.rs on turso main 9cf2de2d8 and run:
++//   cargo test -p turso_core --lib probe_ -- --nocapture --test-threads=1
++
++/// Gap 4: a pager read mark that is not in txs (no MVCC tx) makes the T
++/// checkpoint fail with Busy at the WAL checkpoint, and a later read is right.
++#[test]
++fn probe_t_pager_pin_before_pass_busy() {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let w = db.connect();
++    let mv = db.get_mvcc_store();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
++    let r = db.connect();
++    let rp = r.pager.load().clone();
++    rp.begin_read_tx().unwrap(); // pager pin, no MVCC tx
++    println!("reader pinned at {:?}", rp.wal_pos());
++    w.execute("UPDATE t SET v = 'b' WHERE k = 1").unwrap();
++    let ck = w.execute("PRAGMA wal_checkpoint(TRUNCATE)");
++    let snap = mv.debug_gc_snapshot();
++    println!(
++        "T checkpoint result: {ck:?}, wal_pos = {:?}, rows_versions = {}",
++        w.pager.load().wal_pos(),
++        snap.rows_versions
++    );
++    assert!(ck.is_err(), "T checkpoint must be Busy while a pager reader holds a mark: {ck:?}");
++    rp.end_read_tx();
++    let rows = get_rows(&w, "SELECT v FROM t WHERE k = 1");
++    println!("rows after the reader ended: {rows:?}");
++    assert_eq!(rows, vec![vec![Value::from_text("b")]]);
++}
++
++/// Gap 9: after a T checkpoint the WAL restarted, the stamp is (seq + 1, 0), and
++/// a reader that pins afterwards (not in txs) reads the new value from the B-tree
++/// after the final sweep dropped the row versions.
++#[test]
++fn probe_t_r5_reader_after_restart() {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let w = db.connect();
++    let mv = db.get_mvcc_store();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    w.execute("INSERT INTO t VALUES (1, 'a')").unwrap();
++    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
++    println!("after T checkpoint 1: wal_pos = {:?}", w.pager.load().wal_pos());
++    w.execute("UPDATE t SET v = 'b' WHERE k = 1").unwrap();
++    let before = w.pager.load().wal_pos();
++    w.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
++    let after = w.pager.load().wal_pos();
++    println!("T checkpoint 2: wal_pos {before:?} -> {after:?}");
++    assert_eq!(after, (before.0 + 1, 0), "the T checkpoint restarts the WAL");
++
++    let r = db.connect();
++    let rp = r.pager.load().clone();
++    rp.begin_read_tx().unwrap();
++    let pinned = rp.wal_pos();
++    let versions = mv.debug_gc_snapshot().rows_versions;
++    println!("reader pinned at {pinned:?}, rows_versions before its read = {versions}");
++    assert_eq!(pinned, after);
++    assert_eq!(versions, 0, "the final sweep dropped the row versions");
++    let rows = get_rows(&r, "SELECT v FROM t WHERE k = 1");
++    println!("reader rows: {rows:?}");
++    rp.end_read_tx();
++    assert_eq!(rows, vec![vec![Value::from_text("b")]]);
++}
++
++/// Gap 1: a pager reader at the database file (mark 0) blocks the restart for write
++/// of a passive checkpoint in process: the backfill fails on read lock 0 (wal.rs:2221). The sequence is
++/// the same while it is open. The control runs the same rounds with no reader.
++fn probe_p_rounds(with_reader: bool) -> Vec<(u32, u64)> {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let w = db.connect();
++    w.execute("CREATE TABLE t(k INTEGER PRIMARY KEY, v TEXT)").unwrap();
++    w.execute("INSERT INTO t VALUES (0, 'a')").unwrap();
++    w.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    let mut seen = vec![w.pager.load().wal_pos()];
++    println!("after passive checkpoint 0: wal_pos = {:?}", seen[0]);
++    let r = db.connect();
++    let rp = r.pager.load().clone();
++    if with_reader {
++        rp.begin_read_tx().unwrap();
++        println!("db file reader pinned at {:?}", rp.wal_pos());
++    }
++    for i in 1..4 {
++        w.execute(format!("INSERT INTO t VALUES ({i}, 'b')")).unwrap();
++        w.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++        let pager = w.pager.load();
++        seen.push(pager.wal_pos());
++        println!(
++            "after passive checkpoint {i} (reader open: {with_reader}): wal_pos = {:?}, backfilled = {:?}",
++            pager.wal_pos(),
++            pager.wal_backfill_frame()
++        );
++    }
++    if with_reader {
++        rp.end_read_tx();
++    }
++    seen
++}
++
++#[test]
++fn probe_p_restart_blocked_by_db_file_reader() {
++    let open = probe_p_rounds(true);
++    let control = probe_p_rounds(false);
++    println!("sequence with a reader: {open:?}, control: {control:?}");
++    assert!(
++        control.last().unwrap().0 > control[0].0,
++        "control: the restart runs when no reader is open"
++    );
++    assert_eq!(open.last().unwrap().0, open[0].0, "no restart while a reader is open");
++}

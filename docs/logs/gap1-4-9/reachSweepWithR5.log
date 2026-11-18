@@ -1,0 +1,7 @@
+slot 1 Wed Nov 18 12:42:07 CET 2026
+ok   MvccPassiveCheckpoint-reachSweepWithR5: NeverSweepWithUnregistered fails as expected (116743 states, 15s)
+
+real	0m14.726s
+user	0m17.460s
+sys	0m1.305s
+DONE rc=0 Wed Nov 18 12:42:22 CET 2026

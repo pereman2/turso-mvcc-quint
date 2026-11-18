@@ -1,0 +1,7 @@
+slot 2 Wed Nov 18 12:06:31 CET 2026
+ok   MvccPassiveCheckpoint-restartTruncate: no error (44829324 states, 1198s)
+
+real	19m58.594s
+user	77m28.243s
+sys	4m1.888s
+DONE rc=0 Wed Nov 18 12:26:29 CET 2026

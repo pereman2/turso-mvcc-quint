@@ -1,0 +1,49 @@
+slot 1 Wed Nov 18 12:41:17 CET 2026
+   Compiling turso_core v0.9.0-pre.5 (/Users/peristocles/code/quint-remote/wal-restart-floor/probe-turso/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.41s
+     Running unittests lib.rs (target/debug/deps/turso_core-aa8907ae37609a61)
+
+running 12 tests
+test multiprocess_tests::reject_live_multiprocess_probe_uses_configured_wal_path ... 
+running 1 test
+test multiprocess_tests::multiprocess_hold_open_child_process ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1878 filtered out; finished in 0.02s
+
+ok
+test multiprocess_tests::shared_wal_coordination_path_probe_accepts_nonexistent_relative_paths ... ok
+test mvcc::database::tests::probe_p_restart_blocked_by_db_file_reader ... path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpPklcFW/test_16396587864806270839
+after passive checkpoint 0: wal_pos = (2, 3)
+db file reader pinned at (2, 3)
+after passive checkpoint 1 (reader open: true): wal_pos = (2, 6), backfilled = Some(3)
+after passive checkpoint 2 (reader open: true): wal_pos = (2, 9), backfilled = Some(3)
+after passive checkpoint 3 (reader open: true): wal_pos = (2, 12), backfilled = Some(3)
+path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmpOcioCD/test_9910515105972889044
+after passive checkpoint 0: wal_pos = (2, 3)
+after passive checkpoint 1 (reader open: false): wal_pos = (3, 3), backfilled = Some(3)
+after passive checkpoint 2 (reader open: false): wal_pos = (4, 3), backfilled = Some(3)
+after passive checkpoint 3 (reader open: false): wal_pos = (5, 3), backfilled = Some(3)
+sequence with a reader: [(2, 3), (2, 6), (2, 9), (2, 12)], control: [(2, 3), (3, 3), (4, 3), (5, 3)]
+ok
+test mvcc::database::tests::probe_t_pager_pin_before_pass_busy ... path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmp805CuA/test_7212498185687597010
+reader pinned at (2, 0)
+T checkpoint result: Err(Busy), wal_pos = (2, 3), rows_versions = 3
+rows after the reader ended: [[Text(Text { value: "b", subtype: Text })]]
+ok
+test mvcc::database::tests::probe_t_r5_reader_after_restart ... path: /Users/peristocles/code/quint-remote/wal-restart-floor/tmp/.tmp0RTyCe/test_5818705759661251140
+after T checkpoint 1: wal_pos = (3, 0)
+T checkpoint 2: wal_pos (3, 0) -> (4, 0)
+reader pinned at (4, 0), rows_versions before its read = 0
+reader rows: [[Text(Text { value: "b", subtype: Text })]]
+ok
+test statement::tests::test_spilled_hash_join_counts_the_same_on_every_probe_pass ... ok
+test storage::shared_wal_coordination::tests::mapped_shared_wal_coordination_last_process_probe_reacquires_shared_lifetime_lock ... ok
+test translate::optimizer::join::tests::hash_join_cost_includes_probe_scan ... ok
+test translate::optimizer::join::tests::indexed_hash_build_requires_unfiltered_probe_or_in_seek ... ok
+test vdbe::execute::tests::test_hash_probe_allows_grace_style_probe_after_partition_preload ... ok
+test vdbe::execute::tests::test_hash_probe_rejects_unloaded_spilled_partition_without_probe_rowid ... ok
+test vdbe::hash_table::hashtests::test_probe_partition_with_duplicate_keys ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 1867 filtered out; finished in 0.28s
+
+DONE rc=0 Wed Nov 18 12:41:38 CET 2026

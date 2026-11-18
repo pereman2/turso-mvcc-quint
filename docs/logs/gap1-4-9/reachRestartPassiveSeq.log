@@ -1,0 +1,7 @@
+slot 1 Wed Nov 18 11:51:08 CET 2026
+ok   MvccPassiveCheckpoint-reachRestartPassiveSeq: NeverRestart fails as expected (233922 states, 13s)
+
+real	0m13.399s
+user	0m25.443s
+sys	0m2.287s
+DONE rc=0 Wed Nov 18 11:51:21 CET 2026

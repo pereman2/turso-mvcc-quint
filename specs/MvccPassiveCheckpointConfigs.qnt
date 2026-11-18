@@ -58,7 +58,10 @@ module main {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -118,7 +121,10 @@ module mbt {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -176,7 +182,10 @@ module abortsKeepMaterialized {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -234,7 +243,10 @@ module abortsNoDependency {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -292,7 +304,10 @@ module aborts {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -350,7 +365,10 @@ module dirtyClearFullScanEarly {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -408,7 +426,10 @@ module dirtyKeys {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -466,7 +487,10 @@ module dirtyMarkAfterCommit {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -524,7 +548,10 @@ module dirtyNoGenerationCas {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -581,7 +608,10 @@ module floorBackfill {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -638,7 +668,10 @@ module floorPinned {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -696,7 +729,10 @@ module floorRegistered {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -754,7 +790,10 @@ module gcSampleNoRecheck {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -812,7 +851,10 @@ module gcSample {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -869,7 +911,10 @@ module noBackfillStop {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -926,7 +971,10 @@ module noGcWait {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -983,7 +1031,10 @@ module noSnapshotClamp {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1041,7 +1092,10 @@ module rule3UnderLoadOneLook {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1099,7 +1153,10 @@ module rule3UnderLoad {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1158,7 +1215,10 @@ module ownCheckpoint {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1216,7 +1276,10 @@ module ownCheckpointBackfillFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1274,7 +1337,10 @@ module ownCheckpointKeepsMark {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1332,7 +1398,10 @@ module ownCheckpointKeepsMarkBackfillFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1390,7 +1459,10 @@ module ownCheckpointGc {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1448,7 +1520,10 @@ module ownCheckpointGcBackfillFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1506,7 +1581,10 @@ module ownCheckpointGcPinnedFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1564,7 +1642,10 @@ module reachStampedAboveReader {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1622,7 +1703,10 @@ module reachReaderMarkBelowFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1679,7 +1763,10 @@ module failedPublish {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1736,7 +1823,10 @@ module failedPublishFixed {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1793,7 +1883,10 @@ module reachFailedPublish {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1850,7 +1943,10 @@ module reachRepairedVersions {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1907,7 +2003,10 @@ module logTruncateRace {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1964,7 +2063,10 @@ module reachTruncateAppend {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2021,7 +2123,10 @@ module logTruncateAtomic {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2078,7 +2183,10 @@ module truncateFlagOn {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2135,7 +2243,10 @@ module truncateFlagOnFixed {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2192,7 +2303,10 @@ module reachTruncateRepair {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2249,7 +2363,10 @@ module refuseCheckpointOwner {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2306,7 +2423,10 @@ module rustFix {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2363,7 +2483,10 @@ module rustFixOwner {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2420,7 +2543,10 @@ module rustFixTruncate {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2477,7 +2603,10 @@ module reachCleanupPublish {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2534,7 +2663,10 @@ module rustFixPinnedFloor {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2591,7 +2723,10 @@ module reachEarlyStampGc {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2648,7 +2783,10 @@ module reachEarlyStampGcAfterFailure {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2707,7 +2845,10 @@ module blockingMain {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2766,7 +2907,10 @@ module blockingNoB2Keep {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2824,7 +2968,10 @@ module blockingNoB2InBtree {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2882,7 +3029,10 @@ module blockingNoB2Tombstone {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2941,7 +3091,10 @@ module blockingNoB3CkptMax {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3001,7 +3154,10 @@ module blockingNoFallThroughMark {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3061,7 +3217,10 @@ module blockingNoFallThroughMarkPinned {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3120,7 +3279,10 @@ module blockingNoFallThroughCkptMax {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3179,7 +3341,10 @@ module blockingStampOrigin {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3237,7 +3402,10 @@ module blockingFailAfterPublish {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3297,7 +3465,10 @@ module blockingPagerPin {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3357,7 +3528,10 @@ module blockingPagerPinFixed {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3416,7 +3590,10 @@ module reachBlockingFallThrough {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3474,7 +3651,10 @@ module reachBlockingDropsSuperseded {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3532,7 +3712,10 @@ module reachBlockingDropsCurrent {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3590,7 +3773,10 @@ module reachBlockingStamp {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3648,7 +3834,10 @@ module reachBlockingFailsAfterPublish {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3707,7 +3896,10 @@ module blockingMainNoFallThrough {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3766,7 +3958,10 @@ module mbtBlocking {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3824,7 +4019,10 @@ module reachFixedGcDrops {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3882,7 +4080,10 @@ module reachMainGcDrops {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3940,7 +4141,10 @@ module reachPinGcDrops {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4000,7 +4204,10 @@ module blockingFailTruncatesLog {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4059,7 +4266,10 @@ module mbtBlockingPin {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4117,7 +4327,10 @@ module finalizedMain {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4175,7 +4388,10 @@ module reachFinalizedPrune {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4233,7 +4449,10 @@ module finalizedNoReferenced {
     GuardPruneReferenced = false,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4289,7 +4508,10 @@ module finalizedRemoveBeforeRewriteNoReferenced {
     GuardRule2Lwm = true,
     ModelFinalizedPrune = true,
     GuardPruneReferenced = false,
-    RemoveTxBeforeRewrite = true
+    RemoveTxBeforeRewrite = true,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4345,7 +4567,10 @@ module finalizedRemoveBeforeRewrite {
     GuardRule2Lwm = true,
     ModelFinalizedPrune = true,
     GuardPruneReferenced = true,
-    RemoveTxBeforeRewrite = true
+    RemoveTxBeforeRewrite = true,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4403,7 +4628,10 @@ module reachFinalizedGuardFires {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4462,7 +4690,10 @@ module mbtFinalized {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4525,7 +4756,10 @@ module updates {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4583,7 +4817,10 @@ module reachUpdateCommits {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4641,7 +4878,10 @@ module reachUpdateConflict {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4699,7 +4939,10 @@ module reachConflictByEndOnly {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4757,7 +5000,10 @@ module reachConflictByCurrentOnly {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4815,7 +5061,10 @@ module reachConflictAfterGc {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4873,7 +5122,10 @@ module updatesNoGcWait {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4931,7 +5183,10 @@ module updatesNoRule2Lwm {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4989,7 +5244,10 @@ module updatesNoRule2LwmNoGcWait {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5047,7 +5305,10 @@ module updatesNoIdleRule3NoGcWait {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5106,7 +5367,10 @@ module updatesGcSampleNoRecheck {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5163,7 +5427,10 @@ module updatesGcSampleNoRecheckNoGcWait {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5221,7 +5488,10 @@ module blockingUpdates {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5280,7 +5550,10 @@ module blockingUpdatesNoRule2Lwm {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5343,7 +5616,10 @@ module mbtUpdateCommits {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5401,7 +5677,10 @@ module mbtUpdateConflict {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5459,7 +5738,10 @@ module mbtUpdateConflictByEndOnly {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5517,7 +5799,10 @@ module mbtUpdateConflictByCurrentOnly {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5575,7 +5860,10 @@ module mbtUpdateConflictAfterGc {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = false,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5636,7 +5924,10 @@ module rewriteGroupCommit {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5694,7 +5985,10 @@ module rewriteGroupCommitFixed {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = false,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5752,7 +6046,10 @@ module reachRewriteStamped {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = false,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5812,7 +6109,10 @@ module rewriteSerialized {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5869,7 +6169,10 @@ module rewriteSerializedFixed {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = false,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -5925,6 +6228,832 @@ module mbtRewrite {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = true,
-    RemoveTxBeforeRewrite = false
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = false,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// MaxCheckpoints = 2: the T module with 3 passed 39 minutes, so the passive one runs with 2.
+// Expect no error: with the WAL restart modeled (restart for write, readers that cross a restart read the new generation at their frame number), a pinned reader keeps every version it can see and no reader crosses a restart.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders GcKeepsVersionsAboveReaders NoStrandedVersions PinnedReaderKeepsVisible NoReaderCrossesRestart
+module restartPassive {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect no error: mode T with the restart in the T WAL checkpoint and the final sweep (floor min(registered marks, backfillFloor)).
+// MaxCheckpoints = 2: the run with 3 passed 39 minutes and was stopped.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders GcKeepsVersionsAboveReaders NoStrandedVersions PinnedReaderKeepsVisible NoReaderCrossesRestart
+module restartTruncate {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NoReaderCrossesRestart to fail: a restart that ignores pinned readers leaves a reader on the old sequence.
+// Invariants: NoReaderCrossesRestart
+module restartPassiveIgnoresReaders {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NoReaderCrossesRestart to fail: the T restart ignores a reader that pinned after the backfill.
+// Invariants: NoReaderCrossesRestart
+module restartTruncateIgnoresReaders {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// MaxCheckpoints = 2, as restartTruncate. Expect no error: PROBE, the final sweep without
+// backfill_floor. Not shown needed at these bounds (1 key, 2 readers, 5 timestamps, 2 passes):
+// the registered marks are enough, because a reader that pins after the restart gets a mark
+// at or above every stamp. Only PinnedReaderKeepsVisible was checked.
+// Invariants: PinnedReaderKeepsVisible
+module restartTruncateFloorRegistered {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "registered"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NeverReadAfterRestart to fail: a reader pins after a restart and reads the B-tree.
+// Invariants: NeverReadAfterRestart
+module reachRestartPassive {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NeverRestart to fail: the restart for write happens.
+// Invariants: NeverRestart
+module reachRestartPassiveSeq {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NeverSweepWithUnregistered to fail: the T final sweep drops a version while a reader holds a pin and is outside txs.
+// Invariants: NeverSweepWithUnregistered
+module reachSweepWithR5 {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Trace replay of the WAL restart (mode P). Not model checked (mbt prefix). Run
+// `make bug-traces ONLY=mbtRestart` for traces that restart and read, or
+// `make traces MBT=mbtRestart` for random ones.
+// Expect NeverReadAfterRestart to fail: the replay constants, with the restart on.
+// Invariants: NeverReadAfterRestart
+module mbtRestart {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1", "k2"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = true,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+
+  // A smaller step for the simulator: no failures, no mode B, no GC in steps,
+  // no updates. A restart needs about 20 steps, so the full Next rarely gets there.
+  action NextRestart = any {
+    nondet k = Keys.oneOf()
+    nondet isDelete = Bool.oneOf()
+    WritePrepare(k, isDelete),
+    all {
+      inflight != Set(),
+      nondet i = inflight.oneOf()
+      any { WriteLogAppend(i), WriteFinish(i) },
+    },
+    all {
+      nondet r = Readers.oneOf()
+      any {
+        ReaderPin(r),
+        ReaderBegin(r),
+        nondet k = Keys.oneOf()
+        ReaderReadStart(r, k),
+        ReaderReadEnd(r),
+        ReaderEnd(r),
+      },
+    },
+    CheckpointStart,
+    nondet k = Keys.oneOf()
+    CheckpointCollect(k),
+    CheckpointBeginPager,
+    CheckpointCommit,
+    CheckpointPublish,
+    CheckpointBackfill,
+    CheckpointTruncateDecide,
+    CheckpointStamp,
+    nondet k = Keys.oneOf()
+    Gc(k),
+  }
+}
+
+// Expect PinnedReaderKeepsVisible to fail: a restart that ignores pinned readers.
+// Invariants: PinnedReaderKeepsVisible
+module restartPassiveIgnoresReadersVisible {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect ReadsCorrect to fail: a restart that ignores pinned readers.
+// Invariants: ReadsCorrect
+module restartPassiveIgnoresReadersReads {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect PinnedReaderKeepsVisible to fail: a restart that ignores pinned readers.
+// Invariants: PinnedReaderKeepsVisible
+module restartTruncateIgnoresReadersVisible {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect ReadsCorrect to fail: a restart that ignores pinned readers.
+// Invariants: ReadsCorrect
+module restartTruncateIgnoresReadersReads {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "truncateFlagOn",
+    FixRecollectUnstamped = true,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = false,
+    RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false,
+    ModelWalRestart = true,
+    GuardRestartWaitsForReaders = false,
+    TruncateSweepFloor = "staged"
   ).* from "./MvccPassiveCheckpoint"
 }

@@ -1,0 +1,7 @@
+slot 2 Wed Nov 18 12:49:59 CET 2026
+ok   MvccPassiveCheckpoint-restartTruncateIgnoresReadersVisible: PinnedReaderKeepsVisible fails as expected (2969174 states, 71s)
+
+real	1m11.372s
+user	4m6.245s
+sys	0m5.503s
+DONE rc=0 Wed Nov 18 12:51:10 CET 2026

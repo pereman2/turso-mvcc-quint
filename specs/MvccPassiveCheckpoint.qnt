@@ -48,8 +48,14 @@
  * counted frames and the GC sweep) and a pass that stops after its publish
  * (CheckpointBlockingFail).
  *
+ * WAL restart (ModelWalRestart, DESIGN-rows.md). walSeq counts restarts. A restart
+ * for write (modes P and T, at BeginPager) and the restart in the T WAL checkpoint
+ * (CheckpointRestart) need no pinned reader. A reader that crosses a restart reads
+ * the new generation at its old frame number (EffMark). Mode T then runs a final
+ * sweep (CheckpointFinalSweep). Mode B keeps its counted restart.
+ *
  * Not modeled: schema changes and root-page bindings, indexes, sequences,
- * the WAL restart in passive mode, aborts of Active writers and aborts after
+ * aborts of Active writers and aborts after
  * the log append, write-write conflicts between writers (except a reader that
  * updates one key, see Updates), page-level I/O, and a crash inside a mode B
  * pass.
@@ -173,6 +179,12 @@ module MvccPassiveCheckpoint {
                                             // control). With the frame, RecoveryCorrect holds.
   const BlockingStopsAfterStamp: bool       // a pass can stop after its stamp, before its GC
 
+  // WAL restart (gaps 1, 4, 9). false / true / "staged" in the main configuration.
+  const ModelWalRestart: bool               // walSeq, EffMark, the restarts and the T final sweep
+  const GuardRestartWaitsForReaders: bool   // a restart needs no pinned reader (wal.rs:371, :2359)
+  const TruncateSweepFloor: str             // floor of the T final sweep: "staged" (the code:
+                                            // GcFloor) or "registered" (probe: no backfill_floor)
+
   pure val Inf = 1000   // "no end timestamp", "no reader"
   pure val None = -1    // "no visible version"
 
@@ -196,7 +208,7 @@ module MvccPassiveCheckpoint {
   type CkState = { pc: str, owner: str, snap: int, old: int, todo: Set[str], wset: str -> int,
                    frame: int, full: int, cand: Set[Cand], clearOk: bool, truncate: bool,
                    completed: bool, seen: Set[str], pagerOwned: bool }
-  type RdState = { pc: str, pinned: bool, mark: int, b: int, key: str, vis1: int, valid1: bool,
+  type RdState = { pc: str, pinned: bool, mark: int, seq: int, b: int, key: str, vis1: int, valid1: bool,
                    deps1: Set[int] }
   type ErrRec = { reader: str, key: str, begin: int, mark: int, got: Set[int],
                   want: int, deps: Set[int] }
@@ -239,6 +251,8 @@ module MvccPassiveCheckpoint {
   var gcs: GcState               // Sampled GC values when GC runs in two steps.
   var rmw: Set[Rmw]              // History: updates that passed validation, with begin and commit ts.
   var ending: Set[Ending]        // Commits between CommitEnd and FinalizeCommit (ModelCommitEndRewrite).
+  var walSeq: int                // Number of WAL restarts so far (ModelWalRestart).
+  var genStart: int -> int       // genStart[s]: counted frames before sequence s. genStart[0] = 0.
   var fin: FinState              // finalized_tx_states and the TxID rewrite (ModelFinalizedPrune).
 
   // ---------------------------------------------------------------------------
@@ -303,6 +317,15 @@ module MvccPassiveCheckpoint {
     if (FramesWith(k, 1, m) == Set()) db.get(k)
     else Frame(Max(FramesWith(k, 1, m))).w.get(k)
 
+  // The counted frame that a reader's pager reads. A mark of an older sequence
+  // is an engine frame number, and it now reads that frame of the new
+  // generation. Floors keep the counted mark: (s, N) orders below every
+  // position of s + 1, the same as the counted frames.
+  def EffMarkOf(x: RdState): int =
+    if (x.seq == walSeq) x.mark
+    else Min(Set(wal.length(), genStart.get(walSeq) + (x.mark - genStart.get(x.seq))))
+  def EffMark(r: str): int = EffMarkOf(rd.get(r))
+
   val Pinned: Set[str] = Readers.filter(r => rd.get(r).pinned)
   val Registered: Set[str] = Readers.filter(r => Set("active", "reading").contains(rd.get(r).pc))
 
@@ -327,7 +350,7 @@ module MvccPassiveCheckpoint {
     ck' = { pc: "idle", owner: "", snap: 0, old: 0, todo: Set(), wset: EmptyFn, frame: 0,
             full: 0, cand: Set(), clearOk: false, truncate: false, completed: false, seen: Set(), pagerOwned: false },
     nCk' = 0,
-    rd' = Readers.mapBy(r => { pc: "idle", pinned: false, mark: 0, b: 0, key: AnyKey, vis1: None,
+    rd' = Readers.mapBy(r => { pc: "idle", pinned: false, mark: 0, seq: 0, b: 0, key: AnyKey, vis1: None,
                                valid1: false, deps1: Set() }),
     writes' = Set(),
     logged' = Set(),
@@ -344,10 +367,19 @@ module MvccPassiveCheckpoint {
     ending' = Set(),
     fin' = { retiring: Set(), finalized: Set(), unrewritten: Set(), pc: "idle", ref: Set(),
              pruned: Set(), fired: false, pins: Set() },
+    walSeq' = 0,
+    genStart' = Map(0 -> 0),
   }
 
   // Keeps the row variables as they are.
   action UnchangedRowVars = all {
+    UnchangedRowVarsNoWal,
+    UnchangedWal,
+  }
+
+  action UnchangedWal = all { walSeq' = walSeq, genStart' = genStart }
+
+  action UnchangedRowVarsNoWal = all {
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
     fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
     rmw' = rmw,
@@ -412,7 +444,7 @@ module MvccPassiveCheckpoint {
     aborted' = aborted, readDeps' = readDeps, lateMarks' = lateMarks, UnchangedFullScan,
     gcs' = gcs,
     ending' = ending,
-    fin' = fin,
+    fin' = fin, UnchangedWal,
   }
 
   action WriteLogAppend(i: Inflight): bool = all {
@@ -440,7 +472,7 @@ module MvccPassiveCheckpoint {
     clock' = clock, chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill,
     db' = db, dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor,
     ck' = ck, nCk' = nCk, rd' = rd, writes' = writes, logged' = logged, err' = err,
-    aborted' = aborted, readDeps' = readDeps, dirty' = dirty, UnchangedFullScan,
+    aborted' = aborted, readDeps' = readDeps, dirty' = dirty, UnchangedFullScan, UnchangedWal,
     gcs' = gcs,
     ending' = ending,
     fin' = if (ModelFinalizedPrune)
@@ -471,7 +503,7 @@ module MvccPassiveCheckpoint {
     backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, writes' = writes,
     logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, UnchangedFullScan,
-    gcs' = gcs,
+    gcs' = gcs, UnchangedWal,
     fin' = fin,
   }
 
@@ -495,7 +527,7 @@ module MvccPassiveCheckpoint {
       logged' = logged, err' = err,
       aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
       UnchangedFullScan,
-      gcs' = gcs,
+      gcs' = gcs, UnchangedWal,
       fin' = fin,
     }
   }
@@ -513,7 +545,7 @@ module MvccPassiveCheckpoint {
       logged' = logged, err' = err,
       aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
       UnchangedFullScan,
-      gcs' = gcs,
+      gcs' = gcs, UnchangedWal,
       fin' = if (ModelFinalizedPrune)
                { ...fin, retiring: fin.retiring.union(Set(i.ts)),
                  unrewritten: if (RemoveTxBeforeRewrite) fin.unrewritten.union(Set(i.ts))
@@ -537,7 +569,7 @@ module MvccPassiveCheckpoint {
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
     writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
-    UnchangedFullScan,
+    UnchangedFullScan, UnchangedWal,
     gcs' = gcs,
   }
 
@@ -554,7 +586,7 @@ module MvccPassiveCheckpoint {
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
     writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
-    UnchangedFullScan,
+    UnchangedFullScan, UnchangedWal,
     gcs' = gcs,
   }
 
@@ -568,7 +600,7 @@ module MvccPassiveCheckpoint {
     writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, UnchangedFullScan, gcs' = gcs,
     ending' = ending,
-    fin' = fin,
+    fin' = fin, UnchangedWal,
   }
 
   // require_checkpoint_full_scan after a failed re-mark lost stamp s.
@@ -622,7 +654,7 @@ module MvccPassiveCheckpoint {
       err' = err,
       readDeps' = readDeps, lateMarks' = lateMarks, gcs' = gcs,
       ending' = ending,
-      fin' = fin,
+      fin' = fin, UnchangedWal,
     }
   }
 
@@ -671,7 +703,7 @@ module MvccPassiveCheckpoint {
   action ReaderPin(r: str): bool = all {
     ck.owner != r or ck.pc == "idle",
     rd.get(r).pc == "idle",
-    rd' = rd.setBy(r, x => { ...x, pc: "pinned", pinned: true, mark: wal.length() }),
+    rd' = rd.setBy(r, x => { ...x, pc: "pinned", pinned: true, mark: wal.length(), seq: walSeq }),
     UnchangedForReaders, err' = err,
     UnchangedRowVars,
   }
@@ -716,7 +748,7 @@ module MvccPassiveCheckpoint {
     val b = rd.get(r).b
     val vis2 = LookVis(chain.get(k), b, rd.get(r).mark)
     val valid2 = LookValid(chain.get(k), b, rd.get(r).mark)
-    val bt = BtreeAt(k, rd.get(r).mark)
+    val bt = BtreeAt(k, EffMark(r))
     // Version store side first, B-tree side second.
     val resA = if (rd.get(r).vis1 != None) rd.get(r).vis1 else if (valid2) bt else 0
     // B-tree side first, version store side second.
@@ -726,6 +758,10 @@ module MvccPassiveCheckpoint {
     val resOne = if (vis2 != None) vis2 else if (valid2) bt else 0
     val ok = if (ReadLooksAtChainTwice) resA == want and resB == want else resOne == want
     val deps = rd.get(r).deps1.union(SpecDeps(k, b))
+    val ck0 = SeenFall(chain.get(k), b, rd.get(r).mark)
+    // The value came from the B-tree, through a mark of a later sequence.
+    val ck1 = if (rd.get(r).seq > 0 and vis2 == None and valid2)
+                { ...ck0, seen: ck0.seen.union(Set("readAfterRestart")) } else ck0
     all {
       ck.owner != r or ck.pc == "idle",
       rd.get(r).pc == "reading",
@@ -734,12 +770,12 @@ module MvccPassiveCheckpoint {
                                   got: Set(resA, resB), want: want, deps: deps })),
       readDeps' = if (GuardReadersAbortOnDependency) readDeps else readDeps.union(deps),
       rd' = rd.setBy(r, x => { ...x, pc: "active", deps1: Set() }),
-      ck' = SeenFall(chain.get(k), b, rd.get(r).mark),
+      ck' = ck1,
       UnchangedForReadersExceptCk,
       aborted' = aborted, dirty' = dirty, lateMarks' = lateMarks, UnchangedFullScan,
       gcs' = gcs,
       ending' = ending,
-      fin' = fin,
+      fin' = fin, UnchangedWal,
     }
   }
 
@@ -819,7 +855,7 @@ module MvccPassiveCheckpoint {
       aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
       fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
       ending' = ending,
-      fin' = fin,
+      fin' = fin, UnchangedWal,
     }
   }
 
@@ -904,10 +940,26 @@ module MvccPassiveCheckpoint {
     }
   }
 
+  // A restart needs frames in this generation and all of them backfilled.
+  val CanRestart: bool = and {
+    wal.length() > genStart.get(walSeq),
+    nBackfill == wal.length(),
+  }
+
   action CheckpointBeginPager: bool = {
     val work = ck.wset.keys() != Set() or ck.snap > ck.old
     val stale = ck.owner != "" and rd.get(ck.owner).pinned
                   and rd.get(ck.owner).mark != wal.length()
+    // Restart for write (try_restart_log_before_write): every frame of the
+    // generation is backfilled, and no reader but the checkpoint holds a mark.
+    val restart = and {
+      ModelWalRestart, work, not(stale),
+      CanRestart,
+      not(GuardRestartWaitsForReaders) or and {
+        Pinned.forall(r => r == ck.owner),
+        not(WritersPinMarks) or (inflight == Set() and fin.pins == Set()),
+      },
+    }
     all {
       ck.pc == "collect", ck.todo == Set(),
       ck' = { ...ck, pc: if (not(work)) "published" else if (stale) "idle" else "writing",
@@ -915,7 +967,9 @@ module MvccPassiveCheckpoint {
       chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db,
       dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
       UnchangedForCheckpoint,
-      UnchangedRowVars,
+      UnchangedRowVarsNoWal,
+      walSeq' = if (restart) walSeq + 1 else walSeq,
+      genStart' = if (restart) genStart.put(walSeq + 1, wal.length()) else genStart,
     }
   }
 
@@ -970,7 +1024,7 @@ module MvccPassiveCheckpoint {
   // PASSIVE WAL checkpoint: copy frames into the database file, but never past
   // a frame that a pinned reader does not see. Busy is the case upTo = nBackfill.
   action CheckpointBackfill: bool = {
-    val marks = Pinned.map(r => rd.get(r).mark)
+    val marks = Pinned.map(r => EffMark(r))
                   .union(if (WritersPinMarks) inflight.map(i => i.mark) else Set())
                   .union(if (WritersPinMarks) fin.pins.map(p => p.mark) else Set())
                   // A writer in the commit end window still holds its read mark.
@@ -979,6 +1033,7 @@ module MvccPassiveCheckpoint {
                 else wal.length()
     all {
       ck.pc == "published",
+      // Simplification: the engine can backfill up to a slot 1-4 mark and then fail with Busy.
       Mode == "truncateFlagOn" implies Pinned == Set(),
       // \E to \in nBackfill..limit is false when the range is empty. "to" is
       // a built-in name in Quint, so the pick is named upTo.
@@ -1001,9 +1056,31 @@ module MvccPassiveCheckpoint {
     }
   }
 
+  // Mode T: the WAL checkpoint takes the Writer guard, needs every frame
+  // backfilled, and restarts the log (restart_log, wal.rs:5246-5258). It is Busy
+  // while a reader holds a mark (CheckpointFail at "backfilled").
+  action CheckpointRestart: bool = all {
+    ModelWalRestart,
+    Mode == "truncateFlagOn",
+    ck.pc == "backfilled",
+    nBackfill == wal.length(),
+    not(GuardRestartWaitsForReaders) or Pinned == Set(),
+    ck' = { ...ck, pc: "restarted" },
+    walSeq' = if (wal.length() > genStart.get(walSeq)) walSeq + 1 else walSeq,
+    genStart' = if (wal.length() > genStart.get(walSeq)) genStart.put(walSeq + 1, wal.length())
+                else genStart,
+    chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta,
+    durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
+    UnchangedForCheckpoint,
+    UnchangedRowVarsNoWal,
+  }
+
+  // In mode T with ModelWalRestart the pass goes on to the final sweep.
+  val AfterStamp: str = if (ModelWalRestart and Mode == "truncateFlagOn") "sweep" else "idle"
+
   // LogicalLog::truncate checks the boundary before the file truncate completes.
   action CheckpointTruncateDecide: bool = all {
-    ck.pc == "backfilled",
+    ck.pc == (if (ModelWalRestart and Mode == "truncateFlagOn") "restarted" else "backfilled"),
     llog' = if (not(SplitLogTruncate) and llog.forall(l => l.ts <= durable)) Set() else llog,
     ck' = { ...ck, pc: if (SplitLogTruncate) "truncateDecided" else "truncated",
             truncate: llog.forall(l => l.ts <= durable) },
@@ -1038,7 +1115,7 @@ module MvccPassiveCheckpoint {
                    if (Resolved(LastEvent(v)) and LastEvent(v) <= ck.snap) { ...v, mat: ck.frame }
                    else v)
                else chain.get(k)),
-    ck' = { ...ck, pc: if (DirtyKeys) "prune" else "idle", completed: true,
+    ck' = { ...ck, pc: if (DirtyKeys) "prune" else AfterStamp, completed: true,
       seen: if (FixRecollectUnstamped and ck.seen.contains("failedPublished")
                  and ck.wset.keys().exists(k => chain.get(k).exists(v =>
                    v.mat == 0 and Resolved(LastEvent(v)) and LastEvent(v) <= ck.old)))
@@ -1065,7 +1142,7 @@ module MvccPassiveCheckpoint {
       UnchangedForCheckpoint,
       aborted' = aborted, readDeps' = readDeps, lateMarks' = lateMarks, gcs' = gcs,
       ending' = ending,
-      fin' = fin,
+      fin' = fin, UnchangedWal,
     }
   }
 
@@ -1074,7 +1151,7 @@ module MvccPassiveCheckpoint {
   action CheckpointPruneDone: bool = all {
     ck.pc == "prune",
     ck.cand == Set(),
-    ck' = { ...ck, pc: if (ck.full != 0) "clear" else "idle",
+    ck' = { ...ck, pc: if (ck.full != 0) "clear" else AfterStamp,
                    clearOk: not(GuardFullScanUntilStampCovered) or ck.snap >= fullMin },
     chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db,
     dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
@@ -1087,14 +1164,41 @@ module MvccPassiveCheckpoint {
     ck.pc == "clear",
     fullGen' = if (ck.clearOk and (not(GuardFullScanGenerationCas) or fullGen == ck.full)) 0
                else fullGen,
-    ck' = { ...ck, pc: "idle" },
+    ck' = { ...ck, pc: AfterStamp },
     chain' = chain, llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db,
     dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
     UnchangedForCheckpoint,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
     fullMin' = fullMin, markFails' = markFails, gcs' = gcs, rmw' = rmw,
     ending' = ending,
-    fin' = fin,
+    fin' = fin, UnchangedWal,
+  }
+
+  // The floor of the T final sweep. "staged": min(registered marks, backfillFloor),
+  // what drop_unused_row_versions_inner(true, true, STAGED) takes (mod.rs:8504).
+  // "registered": no backfillFloor (a probe).
+  val SweepFloor: int =
+    if (TruncateSweepFloor == "registered")
+      Min(Registered.map(r => rd.get(r).mark).union(Set(Inf)))
+    else GcFloor
+
+  // Mode T Finalize: drop_unused_row_versions_and_slots, one GC of every chain.
+  action CheckpointFinalSweep: bool = {
+    val after = Keys.mapBy(k => GcChain(k, Lwm, SweepFloor))
+    val dropped = Keys.exists(k => after.get(k) != chain.get(k))
+    all {
+      ModelWalRestart,
+      Mode == "truncateFlagOn",
+      ck.pc == "sweep",
+      chain' = after,
+      ck' = { ...ck, pc: "idle",
+              seen: if (dropped and not(Pinned.forall(r => Registered.contains(r))))
+                      ck.seen.union(Set("sweepWithR5")) else ck.seen },
+      llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta,
+      durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
+      UnchangedForCheckpoint,
+      UnchangedRowVars,
+    }
   }
 
   action CheckpointFail(at: str): bool = {
@@ -1110,7 +1214,13 @@ module MvccPassiveCheckpoint {
                     early.union(Set("cleanupPublished")) else early
     val stopped = { ...ck, pc: "idle", completed: false, seen: history, pagerOwned: false }
     all {
-      CheckpointFailures or (Mode == "truncateFlagOn" and at == "published" and Pinned != Set()),
+      or {
+        CheckpointFailures,
+        Mode == "truncateFlagOn" and at == "published" and Pinned != Set(),
+        // Busy from the T restart: a frame is not backfilled, or a reader holds a mark.
+        ModelWalRestart and Mode == "truncateFlagOn" and at == "backfilled" and
+          (nBackfill < wal.length() or (GuardRestartWaitsForReaders and Pinned != Set())),
+      },
       ck.pc == at,
       if (publish) ApplyCheckpointPublish(stopped)
       else all {
@@ -1373,7 +1483,7 @@ module MvccPassiveCheckpoint {
     gcs.pc == "idle",
     gcs' = { pc: "sampled", lwm: Lwm, floor: GcFloor },
     ending' = ending,
-    fin' = fin,
+    fin' = fin, UnchangedWal,
     chain' = chain,
     ck' = ck,
     UnchangedForGc,
@@ -1399,7 +1509,7 @@ module MvccPassiveCheckpoint {
     gcs.pc == "sampled",
     gcs' = { pc: "idle", lwm: 0, floor: 0 },
     ending' = ending,
-    fin' = fin,
+    fin' = fin, UnchangedWal,
     chain' = chain,
     ck' = ck,
     UnchangedForGc,
@@ -1428,7 +1538,7 @@ module MvccPassiveCheckpoint {
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
     writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
-    UnchangedFullScan,
+    UnchangedFullScan, UnchangedWal,
     gcs' = gcs,
   }
 
@@ -1446,7 +1556,7 @@ module MvccPassiveCheckpoint {
       durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
       writes' = writes, logged' = logged, err' = err,
       aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
-      UnchangedFullScan,
+      UnchangedFullScan, UnchangedWal,
       gcs' = gcs,
     }
   }
@@ -1510,7 +1620,7 @@ module MvccPassiveCheckpoint {
         ReaderUpdate(r, k),
       },
     },
-    nondet at = Set("collect", "writing", "committed", "publishing", "published", "backfilled", "truncateDecided", "truncated", "prune", "clear").oneOf()
+    nondet at = Set("collect", "writing", "committed", "publishing", "published", "backfilled", "truncateDecided", "truncated", "prune", "clear", "restarted", "sweep").oneOf()
     CheckpointFail(at),
     CheckpointStart,
     CheckpointBlocking,
@@ -1523,6 +1633,8 @@ module MvccPassiveCheckpoint {
     CheckpointPublish,
     CheckpointPublishBoundary,
     CheckpointBackfill,
+    CheckpointRestart,
+    CheckpointFinalSweep,
     CheckpointTruncateDecide,
     CheckpointTruncateApply,
     CheckpointStamp,
@@ -1595,6 +1707,22 @@ module MvccPassiveCheckpoint {
     Keys.forall(k => Pinned.union(Registered).forall(r =>
       chain.get(k).exclude(GcChain(k, Lwm, GcFloor)).forall(v => v.mat <= rd.get(r).mark)))
 
+  // A pinned reader never loses a version it can see. A reader outside txs
+  // reads at the would-be begin clock + 1. Only checked with no Preparing
+  // writer below that begin.
+  def ReadFor(k: str, b: int, m: int): int =
+    val vis = LookVis(chain.get(k), b, m)
+    if (vis != None) vis else if (LookValid(chain.get(k), b, m)) BtreeAt(k, m) else 0
+
+  val PinnedReaderKeepsVisible: bool =
+    Pinned.forall(r =>
+      val b = if (Registered.contains(r)) rd.get(r).b else clock + 1
+      InflightTs.forall(t => t > b) implies
+        Keys.forall(k => ReadFor(k, b, EffMark(r)) == Oracle(k, b)))
+
+  // No pinned reader holds a mark of an older WAL sequence.
+  val NoReaderCrossesRestart: bool = Pinned.forall(r => rd.get(r).seq == walSeq)
+
   // First committer wins: no write of k between an update's begin and its commit.
   val NoLostUpdate: bool =
     rmw.filter(u => writes.exists(w => w.ts == u.ts)).forall(u =>
@@ -1609,6 +1737,9 @@ module MvccPassiveCheckpoint {
     ck.pagerOwned == (ck.pc == "writing"),
     clock.in(0.to(MaxTs)),
     nBackfill.in(0.to(wal.length())),
+    walSeq.in(0.to(wal.length())),
+    genStart.keys() == 0.to(walSeq),
+    Readers.forall(r => rd.get(r).seq <= walSeq),
     wal.length() <= MaxCheckpoints,
     durable <= lastCommitted,
     Keys.forall(k => chain.get(k).forall(v => and {
@@ -1654,6 +1785,11 @@ module MvccPassiveCheckpoint {
   // Gap 22: the TxID rewrite resets the stamp of a version that a pass stamped.
   val NeverRewritesStamped: bool = not(ck.seen.contains("rewroteStamped"))
   val NeverStampAtRestart: bool = not(ck.seen.contains("stampedAtRestart"))
+
+  // WAL restart.
+  val NeverRestart: bool = walSeq == 0
+  val NeverSweepWithUnregistered: bool = not(ck.seen.contains("sweepWithR5"))
+  val NeverReadAfterRestart: bool = not(ck.seen.contains("readAfterRestart"))
 
   val NeverFailsAfterPublish: bool = not(ck.seen.contains("failedPublished"))
   val NeverRepairsVersions: bool = not(ck.seen.contains("repairedVersions"))
