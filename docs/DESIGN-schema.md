@@ -831,10 +831,10 @@ says that no writer holds a rowid that a committed row or another writer has.
 
 | Module | Result |
 |---|---|
-| `rowidCache` | TLC_ROWIDCACHE |
-| `rowidKeyByRoot` | TLC_KEYBYROOT |
-| `reachRowidAcrossPublish`, `reachRowidPendingPair`, `reachRowidCacheGc` | TLC_REACH |
-| `main`, `reachStableIdChanges` with `RowidCache = "off"` | TLC_OFF |
+| `rowidCache` | Not verified with TLC yet |
+| `rowidKeyByRoot` | Simulator finds a `NoRowidReuse` violation in 17 states. TLC not run |
+| `reachRowidAcrossPublish`, `reachRowidPendingPair`, `reachRowidCacheGc` | Simulator finds each violation (17, 8 and 25 states). TLC not run |
+| `main`, `reachStableIdChanges` with `RowidCache = "off"` | Not verified with TLC yet |
 
 The `keyByRoot` counterexample: `w1` allocates rowid 1 and does not commit, a
 checkpoint publishes page 2, and `w2` finds no cache under key 2, reads the
