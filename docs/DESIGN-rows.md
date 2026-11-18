@@ -88,37 +88,101 @@ has a `begin_ts` above the clock, so it does not need a version that ended
 before the sample. A stale floor is also safe: a new reader pins the end of
 the WAL, which is at or above every `materialized_at`.
 
-## WAL restart (not modeled)
+## WAL restart
 
-This section is about modes P and T. Mode B restarts the WAL inside its atomic
-pass, and the model counts frames across the restart (section "Mode B").
+Modes P and T, turso main 9cf2de2d8, modeled by `ModelWalRestart` (off: the
+model of before, state for state). Mode B counts frames across its restart
+(section "Mode B").
 
-`WalPos` is `(checkpoint_seq, frame)` and compares in that order
-(mod.rs:4265). A passive checkpoint never restarts the WAL. The next pager
-write restarts it in `try_restart_log_before_write` (wal.rs:5367). The restart
-has three conditions. The writer holds read mark 0. The WAL is fully
-backfilled (`max_frame == nbackfills > 0`). No reader holds read marks 1 to
-4. A
-reader at read mark 0 reads the database file only, and it does not block the
-restart (`restart_ignores_db_file_readers`). In MVCC only the checkpoint
-writes pages, so a restart can only happen at the start of the next
-checkpoint's pager transaction.
+`WalPos` is `(checkpoint_seq, frame)` and compares in that order. A restart adds
+1 to the sequence and sets the frame to 0. There are two restart paths.
 
-This analysis is not verified with TLC.
+1. Restart for write (modes P and T). `begin_write_tx` calls
+   `try_restart_log_before_write` (wal.rs:3632, wal.rs:5367). It restarts only if
+   the writer reads the database file (read mark 0), `max_frame == nbackfills > 0`,
+   it can upgrade read lock 0 (wal.rs:2386), and `begin_restart` gets marks 1 to
+   4 exclusive (wal.rs:2359). `upgrade` needs exactly one reader on the lock
+   (wal.rs:371). So in process, any other reader blocks this restart, also a
+   database file reader at mark 0. The intent `restart_ignores_db_file_readers`
+   (wal.rs:2348) is true only of `begin_restart` itself. In MVCC only the
+   checkpoint writes pages, so the restart runs at the `BeginPagerTxn` of the
+   next pass. The model does it in `CheckpointBeginPager`.
+2. Restart in the T WAL checkpoint. It takes the `Writer` guard (read lock 0 and
+   the write lock, wal.rs:2230-2244), needs every frame backfilled (else Busy,
+   wal.rs:5246) and calls `restart_log` (wal.rs:5249-5258). That is Busy while a
+   reader holds marks 1 to 4. While the guard is held, a new reader takes a mark
+   in slots 1 to 4 (wal.rs:2117-2145). The model has `CheckpointRestart`, and
+   `CheckpointFail` at `"backfilled"` for the Busy.
 
-- Every reader that is open across a restart has a read mark `(s, N)`, where
-  `N` is the last frame of generation `s`, and it reads at read mark 0. A
-  backfill takes read mark 0 exclusively, so it gets `Busy` while that reader
-  is open. The database file does not change under the reader.
-- After the restart, `backfill_floor` becomes `(s+1, 0)`, which is above the
-  old reader's `(s, N)`. So `BackfillFloorBelowReaders` is false across a
-  restart. This is harmless: no frame has a position between `(s, N)` and
-  `(s+1, 0)`, so no `materialized_at` falls between them, and the GC floor
-  gives the same result.
-- `gc_floor_reader_mark` (checkpoint_state_machine.rs:2237) joins the lowest
-  frame in read marks 1 to 4 with the current `checkpoint_seq`. That is
-  correct, because a reader in marks 1 to 4 blocks the restart, so its frame
-  is always in the current generation.
+So both paths restart only when no pager reader other than the checkpoint holds a
+mark. A reader that pins after the restart gets `(s+1, 0)`. After the T restart,
+`backfill_floor` and the stamp are `(s+1, 0)` (ck.rs:3385-3388, ck.rs:2176).
+
+Mode T Finalize runs `drop_unused_row_versions_and_slots` (ck.rs:3431), which is
+`drop_unused_row_versions_inner(true, true, STAGED)` (mod.rs:8232). The floor is
+`min(compute_min_reader_mark, backfill_floor, reader_mark_floor)` (mod.rs:8504).
+The
+comment "That lock waits out open MVCC txs" (ck.rs:3428) is false with the
+passive flag: `begin_tx` and `gc_incremental` skip `blocking_checkpoint_lock`
+(mod.rs:6749, mod.rs:8250). Readers begin and inline GC runs during the pass.
+The model has this sweep as `CheckpointFinalSweep`: one `GcChain` of every key
+with `SweepFloor`.
+
+Why it matters. The sweep drops the last current version (Rule 3) once its stamp
+is at or below the floor and no snapshot is open. A reader that pinned a mark
+below the stamp and is not in `txs` (rule R5) is not in that floor. In mode T
+this reader still reads every row, and the floor is not the reason. Every T
+sweep follows a full backfill and a restart in the same pass. So every stamp is
+at or below `genStart(walSeq)`. A reader that pins after the restart has a mark
+at or above every stamp. If a reader stays pinned across the restart (guard
+off), its `EffMark` is also at or above `genStart(walSeq)`. So it reads every
+stamped row from the database file. So no sweep floor can break
+`PinnedReaderKeepsVisible` in mode T, not even `Inf`. The model cannot show that
+the `backfill_floor` term is needed there. The harm in the guard-off variants
+comes from a reader that reads frames of the new generation at its old frame
+number (`EffMark`). It does not come from the sweep.
+
+Simplification. In the engine, a reader in marks 1 to 4 lets the T backfill
+copy frames up to its mark. Then the pass fails with Busy (wal.rs:5246,
+wal.rs:2359). A database file reader makes the `Writer` guard fail before any
+backfill (wal.rs:2236). The model does not backfill in mode T while a reader is
+pinned (`CheckpointBackfill`), and the pass fails with Busy. The partial
+backfill is left out. It does not move `backfill_floor` and does not stamp,
+because the pass stops before `TruncateWal`. The engine backfills only frames
+that the reader can already see.
+
+Invariants: `PinnedReaderKeepsVisible` (a pinned reader, in `txs` or not, reads
+the oracle value of every key at its begin, through `EffMark`; checked when no
+Preparing writer is below that begin) and `NoReaderCrossesRestart`. Witnesses:
+`NeverRestart`, `NeverReadAfterRestart`, `NeverSweepWithUnregistered` (no digit
+in the name, because the Makefile cannot read one).
+
+Results (1 key, 2 readers, 5 timestamps).
+
+| Module | Result | Distinct states | Time |
+|---|---|---|---|
+| `main`, `truncateFlagOnFixed` (regression) | No error, same counts as before | 17,344,980 and 300,115 | 990 s, 18 s |
+| `restartPassive` (2 passes) | No error | 22,042,689 | 838 s |
+| `restartTruncate` (2 passes) | No error | 44,829,324 | 1198 s |
+| `restartPassiveIgnoresReaders` | `NoReaderCrossesRestart` fails. `PinnedReaderKeepsVisible` fails (`...Visible`, 1,284,769 states). `ReadsCorrect` fails (`...Reads`, 2,293,919) | 333,194 | 22 s |
+| `restartTruncateIgnoresReaders` | `NoReaderCrossesRestart` fails. `PinnedReaderKeepsVisible` fails (2,969,174). `ReadsCorrect` fails (5,000,708) | 17,452 | 8 s |
+| `restartTruncateFloorRegistered` (2 passes) | No error for `PinnedReaderKeepsVisible` (the only invariant checked). The floor cannot change a sweep in mode T: the state count equals `restartTruncate` | 44,829,324 | 1390 s |
+| `reachRestartPassive` (3 passes) | `NeverReadAfterRestart` fails. `reachRestartPassiveSeq`: `NeverRestart` fails (233,922 states, 13 s) | 5,767,332 | 342 s |
+| `reachSweepWithR5` | `NeverSweepWithUnregistered` fails (3 passes) | 116,743 | 15 s |
+
+`restartTruncate` with 3 passes ran 39 minutes and was stopped, so the modules
+marked "2 passes" use `MaxCheckpoints = 2`.
+
+Replay of `mbtRestart`: 19 traces, 0 refused, 0 failed. After each
+`CheckpointBeginPager`, the engine sequence changed iff `walSeq` did. The committed row traces still conform
+(`mbt_tests::rows`, 6 passed). The three probes of
+`harness/repro/wal-restart-floor.patch` pass on main 9cf2de2d8: pin `(2, 0)` and the T checkpoint gives `Err(Busy)`; T checkpoint 2 moves
+`(3, 0)` to `(4, 0)`, and a reader that pins reads `b` with `rows_versions = 0`;
+with a database file reader open, four passive checkpoints keep sequence 2
+(frames 3, 6, 9, 12, backfill stops at 3), and with no reader they give 2, 3, 4, 5.
+
+Left out: a restart with no frame in the generation (skipped), writer marks
+across a restart, a crash inside a restart, and the T steps in the replay (refused).
 
 ## Rules
 
@@ -686,6 +750,9 @@ Constants of mode B. All "off" values give the passive model, state for state.
 | `GuardFallThroughMark` | true | The fall-through needs a stamp at or below the mark |
 | `BlockingStampOrigin` | false | What-if: the B stamp writes `ORIGIN` |
 | `FixB2WaitsForPinned` | false | A fix that keeps GC alive in the model: Rule 2 B drops nothing while a pinned read mark is below the WAL max frame. Not in the engine and not tried in Rust |
+| `ModelWalRestart` | false | `walSeq`, `genStart`, `RdState.seq`, the restarts and the T final sweep (section "WAL restart") |
+| `GuardRestartWaitsForReaders` | true | A restart needs no pinned reader (wal.rs:371, wal.rs:2359) |
+| `TruncateSweepFloor` | `"staged"` | Floor of the T final sweep: `"staged"` (the code) or `"registered"` (probe) |
 | `BlockingFailTruncatesLog` | false | What-if: a failed pass also empties the logical log (control for `RecoveryCorrect`) |
 | `BlockingStopsAfterStamp` | false | A pass stops after its stamp |
 

@@ -338,6 +338,19 @@ instead of `CookieNotBehind`.
 | `reachGcAfterBegin` | Not replayed to the `GcApply` step. The traces that `quint run` found stop first at the existing `GcDropped` hole at `CheckpointFinish` or at the refusal of a frame between a pin and a begin. So this run does not show that the engine rechecks the lwm |
 | 200 random `gcSample` and `gcSampleCatalog` traces | Most conform. The rest fail with `CookieBehind` (#11499) or `RecoveryRows` (#11502), or `GcDropped` at `CheckpointFinish`, or are refused. Random traces of the old spec `main` fail the same ways |
 
+## WAL restart (gaps 1, 4, 9)
+
+With `ModelWalRestart`, the row driver checks the restart for write after
+each `CheckpointBeginPager` step: the engine checkpoint sequence
+(`get_checkpoint_seq`) changed if and only if the spec `walSeq` changed
+(`checkpoint_begin_pager` in `rows.rs`). Traces from before the constant have
+no `walSeq`, and the check skips them. The module `mbtRestart` has the replay
+constants with the restart on. The mode T steps stay refused
+(`CheckpointRestart`, `CheckpointFinalSweep` have no engine step). The mode T
+restart and the final sweep are checked by the probe patch
+`harness/repro/wal-restart-floor.patch` (three tests, turso main 9cf2de2d8, see
+`harness/repro/README.md`).
+
 ## Traces of `ReaderUpdate` (gap 7)
 
 The driver `RowDriver::new_with_updates()` makes readers use `BEGIN CONCURRENT`.
