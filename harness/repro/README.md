@@ -174,11 +174,11 @@ The patch applies to turso main at `740300d9d`. It adds three tests to
 flag `experimental_mvcc_passive_checkpoint` is on and `PRAGMA synchronous=NORMAL`
 is set on the checkpointing connection.
 
-| Test | Expected | Actual on 740300d9d |
-|---|---|---|
-| `passive_checkpoint_under_normal_with_pinned_reader_keeps_committed_row_after_power_loss` | After a power loss the row `42` is still there | The read gives `[]` |
-| `passive_checkpoint_under_normal_with_pinned_reader_keeps_fsynced_row_after_power_loss` | Same, with a `synchronous=FULL` commit of `42` before the checkpoint | The read gives `[]` |
-| `passive_checkpoint_power_loss_controls_keep_committed_row` | `synchronous=FULL` with a pinned reader, and NORMAL with no pinned reader, keep `42` | Passes |
+| Test | Expected | Actual on 740300d9d | Actual on 3fcfb6fc9 |
+|---|---|---|---|
+| `passive_checkpoint_under_normal_with_pinned_reader_keeps_committed_row_after_power_loss` | After a power loss the row `42` is still there | The read gives `[]` | The read gives `[]` |
+| `passive_checkpoint_under_normal_with_pinned_reader_keeps_fsynced_row_after_power_loss` | Same, with a `synchronous=FULL` commit of `42` before the checkpoint | The read gives `[]` | Passes |
+| `passive_checkpoint_power_loss_controls_keep_committed_row` | `synchronous=FULL` with a pinned reader, and NORMAL with no pinned reader, keep `42` | Passes | Passes |
 
 A second connection holds `BEGIN` plus a `SELECT`. The passive backfill then
 copies no frame, so nothing fsyncs the WAL. The checkpoint truncates and fsyncs
@@ -193,7 +193,11 @@ cd <turso>
 cargo test -p core_tester --test integration_tests passive_checkpoint_ -- --nocapture --test-threads=1
 ```
 
-Each of the two failing tests failed in 3 of 3 runs. A probe that fsyncs the WAL
+Each of the two failing tests failed in 3 of 3 runs on 740300d9d. On 3fcfb6fc9
+the patch applies as is, and each test gives the same result in 3 of 3 runs.
+The FULL-commit test passes there because turso commit d52ed55ca removed the
+log fsync after the checkpoint truncate. The power loss now drops the
+truncate too, so the durable log keeps the frame. A probe that fsyncs the WAL
 in the Busy arm before `TruncateLogicalLog` when `sync_mode != Off` makes all
 three pass. The probe covers only the Busy arm and is not a full fix. A pass
 that returns OK with 0 frames copied (the reader mark sits at `nbackfills`,
