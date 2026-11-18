@@ -155,6 +155,39 @@ index 5aca97644..79647ff11 100644
      #[test]
      fn collect_table_rows_full_scan_visits_every_row() {
          let mut checkpoint = checkpoint_for_collect_tests();
+diff --git a/core/mvcc/database/mod.rs b/core/mvcc/database/mod.rs
+index bca205690..0542620fc 100644
+--- a/core/mvcc/database/mod.rs
++++ b/core/mvcc/database/mod.rs
+@@ -1580,6 +1580,11 @@ pub(crate) enum CommitYieldPoint {
+     /// before the offset is advanced. Dropping the waiter here must not
+     /// roll back a write the leader still owns.
+     LogicalLogWriteIssued,
++    /// Fires once on the first entry into `step_rewrite_live_versions`
++    /// (cursor=0), after `CommitEnd` stored `Committed(end_ts)` and before any
++    /// row version is rewritten from its TxID to the timestamp. Gap 22 of the
++    /// Quint model: the window between CommitEnd and FinalizeCommit.
++    RewriteLiveVersionsStart,
+ }
+ 
+ #[cfg(any(test, injected_yields))]
+@@ -3022,6 +3027,16 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> CommitStateMachine<Clock, A> {
+         &mut self,
+         mvcc_store: &Arc<MvStore<Clock, A>>,
+     ) -> Result<TransitionResult<()>> {
++        // First entry (no row rewritten yet). The macro needs `&self`, so it
++        // runs before the `&mut self.state` re-bind below.
++        let is_first_entry = matches!(
++            self.state,
++            CommitState::RewriteLiveVersions(RewriteLiveVersionsCtx { cursor: 0, .. })
++        );
++        if is_first_entry {
++            inject_transition_yield!(self, CommitYieldPoint::RewriteLiveVersionsStart);
++        }
++
+         let tx_id = self.tx_id;
+         let tx = self.committing_tx(mvcc_store).ok_or_else(|| {
+             LimboError::NoSuchTransactionID(format!(
 diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
 index 0b7c50f33..f3e9bad84 100644
 --- a/core/mvcc/database/tests.rs

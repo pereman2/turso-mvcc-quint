@@ -49,6 +49,10 @@ pub(super) struct RowDriver {
     /// Writers that stopped before `remove_tx` (spec `fin.retiring`), by spec
     /// commit timestamp.
     retiring: HashMap<i64, Writer>,
+    /// Writers between `CommitEnd` and `FinalizeCommit` (spec `ending`), by
+    /// spec commit timestamp. They hold `Committed(end_ts)` in `txs` and
+    /// the pager commit lock.
+    ending: HashMap<i64, Writer>,
     /// Engine TxID of each spec commit timestamp.
     tx_ids: BTreeMap<i64, u64>,
     /// The TxIDs that `FinPruneCollect` saw in the version chains.
@@ -82,6 +86,9 @@ impl Driver for RowDriver {
             "WritePrepare" => self.write_prepare(step)?,
             "WriteLogAppend" => self.write_log_append(step)?,
             "WriteFinish" => self.write_finish(step)?,
+            "WriteCommitEnd" => self.write_commit_end(step)?,
+            "WriteRewriteTxId" => self.write_rewrite_txid(step)?,
+            "WriteFinalize" => self.write_finalize(step)?,
             "WriteRemoveTx" => self.write_remove_tx(step)?,
             "FinPruneCollect" => self.fin_prune_collect(),
             "FinPruneApply" => self.fin_prune_apply(),
@@ -198,6 +205,7 @@ impl RowDriver {
             free_writers: Vec::new(),
             writers: HashMap::new(),
             retiring: HashMap::new(),
+            ending: HashMap::new(),
             tx_ids: BTreeMap::new(),
             referenced: Default::default(),
             finalize_ran: false,
@@ -277,7 +285,7 @@ impl RowDriver {
     pub(super) fn write_log_append(&mut self, step: &Step) -> StepOutcome {
         let ts = step.pick("i").field("ts").int();
         assert!(
-            !self.writers.values().any(|w| w.logged),
+            !self.writers.values().any(|w| w.logged) && self.ending.is_empty(),
             "two writers between log append and finish: the engine holds pager_commit_lock, \
              and LogAppendOneAtATime of the spec rules this out"
         );
@@ -296,7 +304,86 @@ impl RowDriver {
 
     pub(super) fn write_finish(&mut self, step: &Step) -> StepOutcome {
         let ts = step.pick("i").field("ts").int();
+        let writer = self.writers.remove(&ts).unwrap();
+        self.finish_writer(step, ts, writer)
+    }
+
+    /// CommitEnd: the writer is `Committed(end_ts)` in `txs`. The COMMIT stops
+    /// at the first entry into `step_rewrite_live_versions`, before it
+    /// rewrites any row version (test hook `RewriteLiveVersionsStart`).
+    fn write_commit_end(&mut self, step: &Step) -> StepOutcome {
+        let ts = step.pick("i").field("ts").int();
         let mut writer = self.writers.remove(&ts).unwrap();
+        assert!(writer.logged, "WriteCommitEnd needs a logged writer");
+        writer.stop.set(
+            CommitYieldPoint::RewriteLiveVersionsStart.point(),
+            Some(commit_yield_key(writer.tx_id)),
+        );
+        assert!(
+            step_statement(&mut writer.commit, &writer.stop, &self.io),
+            "COMMIT did not stop at the start of the TxID rewrite"
+        );
+        match self.mv.txs.get(&writer.tx_id).unwrap().value().state.load() {
+            TransactionState::Committed(end_ts) if end_ts == self.engine_ts[&ts] => {}
+            other => panic!("a COMMIT at RewriteLiveVersionsStart must be Committed, got {other:?}"),
+        }
+        self.ending.insert(ts, writer);
+        Ok(())
+    }
+
+    /// The TxID rewrite: the COMMIT runs until the rewrite is done, which is
+    /// the yield point after the pager commit lock is released. Then every
+    /// version of the writer's key has `materialized_at == ORIGIN` if and only if the
+    /// spec says `mat == 0`. The engine and the spec must agree on how many
+    /// versions of the key keep a stamp.
+    fn write_rewrite_txid(&mut self, step: &Step) -> StepOutcome {
+        let i = step.pick("e").field("i");
+        let ts = i.field("ts").int();
+        let key = spec_key(i.field("k"));
+        let writer = self.ending.get_mut(&ts).unwrap();
+        writer.stop.set(
+            CommitYieldPoint::BeforeGlobalHeaderUpdate.point(),
+            Some(commit_yield_key(writer.tx_id)),
+        );
+        assert!(
+            step_statement(&mut writer.commit, &writer.stop, &self.io),
+            "COMMIT did not stop after the TxID rewrite"
+        );
+        let spec = step
+            .var("chain")
+            .get_str(&format!("k{key}"))
+            .items()
+            .iter()
+            .filter(|v| v.field("mat").int() != 0)
+            .count();
+        let engine = self.mv.rows.get(&self.row_id(key)).map_or(0, |entry| {
+            entry
+                .value()
+                .read()
+                .iter()
+                .filter(|v| v.materialized_at != crate::mvcc::database::WalPos::ORIGIN)
+                .count()
+        });
+        if spec != engine {
+            return fail(
+                Failure::Chain,
+                format!(
+                    "k{key} after the TxID rewrite: spec has {spec} stamped versions, \
+                     engine has {engine}"
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    /// FinalizeCommit: the rest of the old WriteFinish.
+    fn write_finalize(&mut self, step: &Step) -> StepOutcome {
+        let ts = step.pick("e").field("i").field("ts").int();
+        let writer = self.ending.remove(&ts).unwrap();
+        self.finish_writer(step, ts, writer)
+    }
+
+    fn finish_writer(&mut self, step: &Step, ts: i64, mut writer: Writer) -> StepOutcome {
         // With ModelFinalizedPrune the spec splits the end of the commit:
         // WriteFinish stops before remove_tx and WriteRemoveTx runs it.
         // Every trace has `fin`, so key on `fin.retiring`.
@@ -1077,6 +1164,32 @@ const GENERATED_ROW_TRACES: [(&str, &str); 7] = [
     ("rows-186", include_str!("traces/rows-186.itf.json")),
     ("rows-196", include_str!("traces/rows-196.itf.json")),
 ];
+
+/// Traces of `mbtRewrite` (gap 22): a checkpoint step runs between
+/// `WriteCommitEnd` and `WriteRewriteTxId`. In rewrite-window-15 that step is
+/// `CheckpointStamp`. The replay compares the stamped versions after the
+/// rewrite.
+const REWRITE_WINDOW_TRACES: [(&str, &str); 2] = [
+    (
+        "rewrite-window-11",
+        include_str!("traces/rewrite-window-11.itf.json"),
+    ),
+    (
+        "rewrite-window-15",
+        include_str!("traces/rewrite-window-15.itf.json"),
+    ),
+];
+
+#[test]
+fn rewrite_window_traces_conform() {
+    for (name, trace) in REWRITE_WINDOW_TRACES {
+        assert_eq!(
+            replay(name, trace, Expect::Conforms, &mut RowDriver::new()),
+            Replay::Done,
+            "{name} did not replay"
+        );
+    }
+}
 
 /// Steps `stmt` like `step_statement`, and returns the error of the engine.
 fn step_statement_result(
