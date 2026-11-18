@@ -42,9 +42,13 @@ commit can finish inside the window. So `last_committed_tx_ts < end_ts`, the
 pass skips the commit, and nothing is stamped in the window. This explains
 the probe of gap 22: it ran without group commit, and 0 versions were left.
 
-With group commit (`PRAGMA mvcc_group_commit`, mod.rs:3405-3416), a commit
-releases the lock at `GroupPrefixSynced` (mod.rs:3568-3575), before
-`CommitEnd`. Example with T1 at ts 10 and T2 at ts 11:
+With group commit (`PRAGMA mvcc_group_commit`, mod.rs:3405-3416), a leader
+takes the lock and writes the queued records of other commits. Its own record
+ends in `SyncLogicalLog` (mod.rs:1970-1976), so the leader keeps the lock until
+its own `FinalizeCommit`. A follower, whose record a leader wrote, reaches
+`CommitEnd` with no lock. So a follower can be in the window while a commit
+with a higher timestamp finishes. Example with follower T1 at ts 10 and T2 at
+ts 11:
 
 ```
 T1: CommitEnd(10) -- rewrite chunk 1 (rows 1..1024) -- yield ...... rewrite rows 1025..1100 (mat := 0)
@@ -135,6 +139,10 @@ The row replay drives one logged writer at a time, so it replays
 the old `WriteFinish` code.
 
 The group commit leak is shown by a Rust test instead
-(`harness/repro/commitend-rewrite-leak.patch`). It uses SQL only, and reads
-`MvStore::rows` to count versions. A 1100-row commit gives the window without a
-hook, because the rewrite yields after 1024 rows.
+(`harness/repro/commitend-rewrite-leak.patch`). The commits use SQL, and a
+1100-row commit gives the window, because the rewrite yields after 1024 rows.
+The test is single-threaded, so it holds `pager_commit_lock` by hand until a
+leader and a follower are both queued. In a real workload, two threads queue
+them. The test reads `MvStore::rows` to count versions. It needs no
+`#[cfg(test)]` hook, but it needs these crate-internal reads, so it is a test
+inside `turso_core`.
