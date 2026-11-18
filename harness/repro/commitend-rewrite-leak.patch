@@ -12,12 +12,12 @@ index a94c7f72f..2a44b27ee 100644
 +// the window. The key is no longer dirty, so no later pass stamps it again,
 +// and GC never drops it.
 +//
-+// The window needs a commit that holds no pager commit lock between CommitEnd
-+// and FinalizeCommit. That is a group commit follower F: a leader L writes the
-+// record of F, and F continues without the lock. A later commit B then finishes
-+// while F rewrites, and raises `last_committed_tx_ts` above the end_ts of F. The
++// The leak needs a commit B with a higher end_ts to finish while F is in the
++// window. Out of order: F takes end_ts before BuildLogRecord and the pager
++// commit lock, so B can finish first. Group commit: a leader L writes the
++// record of follower F, and F continues without the lock. The group commit
 +// test holds `pager_commit_lock` by hand until L and F are both queued, so L
-+// leads and F follows. It steps the three COMMITs one at a time.
++// leads and F follows. Each test steps its COMMITs one at a time.
 +
 +/// Steps `stmt` until it is done. Returns false if it still runs after `limit` steps.
 +fn step_to_done(stmt: &mut crate::Statement, limit: usize) -> bool {
