@@ -1168,8 +1168,9 @@ const GENERATED_ROW_TRACES: [(&str, &str); 7] = [
 /// Traces of `mbtRewrite` (gap 22): a checkpoint step runs between
 /// `WriteCommitEnd` and `WriteRewriteTxId`. In rewrite-window-15 that step is
 /// `CheckpointStamp`. The replay compares the stamped versions after the
-/// rewrite.
-const REWRITE_WINDOW_TRACES: [(&str, &str); 2] = [
+/// rewrite. In rewrite-window-reset a version of the writer has `mat != 0`
+/// just before `WriteRewriteTxId`, so the rewrite resets a stamp.
+const REWRITE_WINDOW_TRACES: [(&str, &str); 3] = [
     (
         "rewrite-window-11",
         include_str!("traces/rewrite-window-11.itf.json"),
@@ -1177,6 +1178,10 @@ const REWRITE_WINDOW_TRACES: [(&str, &str); 2] = [
     (
         "rewrite-window-15",
         include_str!("traces/rewrite-window-15.itf.json"),
+    ),
+    (
+        "rewrite-window-reset",
+        include_str!("traces/rewrite-window-reset.itf.json"),
     ),
 ];
 
