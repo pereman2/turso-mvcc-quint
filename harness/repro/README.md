@@ -156,6 +156,8 @@ cargo test -p turso_core --lib preparing_delete_below_begin -- --test-threads=1
 ```
 
 The first test failed in 10 of 10 runs. The control passed in 10 of 10.
+The patch also applies to turso main at `624ed32dbb`. There the first test
+failed in 3 of 3 runs with the same error, and the control passed in 3 of 3.
 
 Duplicate search, `gh issue list -R tursodatabase/turso --state all --search`
 on 2026-11-18: "WriteWriteConflict preparing", "WriteWriteConflict preparing
