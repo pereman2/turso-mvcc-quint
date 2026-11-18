@@ -104,3 +104,30 @@ cargo test -p core_tester --test integration_tests portable_insert_after_stale_s
 ```
 
 The test failed in 3 of 3 runs.
+
+## commitend-rewrite-leak.patch
+
+The patch applies to turso main at `9cf2de2d8`. It adds two tests to
+`core/mvcc/database/tests.rs` and changes no engine code. A group commit
+follower F is between `CommitEnd` and `FinalizeCommit` (its rewrite yields after
+1024 rows). A later commit B finishes, and a passive pass stamps the rows of F.
+Then the rewrite resets the stamps and GC never drops the rows (gap 22).
+
+| Test | Gap | Expected | Actual on 9cf2de2d8 |
+|---|---|---|---|
+| `group_commit_rewrite_window_keeps_checkpoint_stamps` | 22 | No row version of `t` stays in `mv_store.rows` after the reader ends and three more passes | 76 versions stay |
+| `serialized_commit_rewrite_window_keeps_checkpoint_stamps` | 22, control | The same steps without group commit leave none | Passes, 0 left |
+
+The test uses the SQL of public API only for the data. To place F in the window
+it steps each `COMMIT` and holds `pager_commit_lock` by hand until the leader and
+F are both queued (as `commit_parks_once_while_another_transaction_holds_the_commit_lock` does).
+It reads `MvStore::rows` to count versions.
+
+```bash
+git -C <turso> checkout 9cf2de2d8
+git -C <turso> apply <this repo>/harness/repro/commitend-rewrite-leak.patch
+cd <turso>
+cargo test -p turso_core --lib rewrite_window_keeps_checkpoint_stamps -- --nocapture --test-threads=1
+```
+
+The group commit test failed in 3 of 3 runs, with 76 versions left each time.

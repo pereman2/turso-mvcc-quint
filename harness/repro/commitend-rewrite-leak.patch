@@ -1,0 +1,197 @@
+diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
+index a94c7f72f..5d930c6d6 100644
+--- a/core/mvcc/database/tests.rs
++++ b/core/mvcc/database/tests.rs
+@@ -5378,3 +5378,192 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+         TursoAllocator,
+     )
+ }
++
++// Gap 22 of pereman2/turso-mvcc-quint: the TxID rewrite after CommitEnd resets
++// `materialized_at` on a version that a passive checkpoint pass stamped inside
++// the window. The key is no longer dirty, so no later pass stamps it again,
++// and GC never drops it.
++//
++// The window needs a commit that holds no pager commit lock between CommitEnd
++// and FinalizeCommit. That is a group commit follower F: a leader L writes the
++// record of F, and F continues without the lock. A later commit B then finishes
++// while F rewrites, and raises `last_committed_tx_ts` above the end_ts of F. The
++// test holds `pager_commit_lock` by hand until L and F are both queued, so L
++// leads and F follows. It steps the three COMMITs one at a time.
++
++/// Steps `stmt` until it is done. Returns false if it still runs after `limit` steps.
++fn step_to_done(stmt: &mut crate::Statement, limit: usize) -> bool {
++    for _ in 0..limit {
++        match stmt.step().unwrap() {
++            StepResult::Done => return true,
++            StepResult::IO | StepResult::Yield | StepResult::Row => {}
++            other => panic!("unexpected step result {other:?}"),
++        }
++    }
++    false
++}
++
++fn table_versions_left(store: &crate::MvStore, table_id: crate::mvcc::database::MVTableId) -> usize {
++    store
++        .rows
++        .iter()
++        .filter(|entry| entry.key().table_id == table_id)
++        .map(|entry| entry.value().read().len())
++        .sum()
++}
++
++fn run_rewrite_window_checkpoint_test(group_commit: bool) -> usize {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let setup = db.connect();
++    setup
++        .execute("CREATE TABLE t(pk INTEGER PRIMARY KEY, v INTEGER)")
++        .unwrap();
++    setup
++        .execute("PRAGMA mvcc_checkpoint_threshold = -1")
++        .unwrap();
++    setup
++        .execute(if group_commit {
++            "PRAGMA mvcc_group_commit = yes"
++        } else {
++            "PRAGMA mvcc_group_commit = no"
++        })
++        .unwrap();
++    let root = get_rows(
++        &setup,
++        "SELECT rootpage FROM sqlite_schema WHERE name = 't'",
++    )[0][0]
++        .as_int()
++        .unwrap();
++    setup.close().unwrap();
++    let store = db.get_mvcc_store();
++    let table_id = store.get_table_id_from_root_page(root);
++    let coordinator = &store.commit_coordinator;
++
++    // R keeps the lwm below MAX, so GC Rule 3 does not drop rows in the window.
++    let reader = db.connect();
++    reader.execute("BEGIN").unwrap();
++    assert_eq!(
++        get_rows(&reader, "SELECT count(*) FROM t")[0][0]
++            .as_int()
++            .unwrap(),
++        0
++    );
++
++    // F inserts 1100 rows. Its rewrite yields after 1024 of them.
++    let conn_f = db.connect();
++    conn_f.execute("BEGIN CONCURRENT").unwrap();
++    for pk in 1..=1100 {
++        conn_f
++            .execute(format!("INSERT INTO t VALUES ({pk}, {pk})"))
++            .unwrap();
++    }
++    let tx_f = conn_f.get_mv_tx_id().unwrap();
++    let mut commit_f = conn_f.prepare("COMMIT").unwrap();
++    let conn_l = db.connect();
++    let mut commit_l = None;
++
++    if group_commit {
++        // L queues first, F second. Nobody can lead while the test holds the lock.
++        assert!(coordinator.pager_commit_lock.write());
++        conn_l.execute("BEGIN CONCURRENT").unwrap();
++        conn_l.execute("INSERT INTO t VALUES (9000, 1)").unwrap();
++        let mut commit = conn_l.prepare("COMMIT").unwrap();
++        for _ in 0..1000 {
++            if coordinator.parked_tickets().len() == 1 {
++                break;
++            }
++            commit.step().unwrap();
++        }
++        assert_eq!(coordinator.parked_tickets().len(), 1, "L did not park");
++        for _ in 0..1000 {
++            if coordinator.parked_tickets().len() == 2 {
++                break;
++            }
++            commit_f.step().unwrap();
++        }
++        assert_eq!(coordinator.parked_tickets().len(), 2, "F did not park");
++        // L wins the lock, writes the records of L and F, and finishes. F
++        // stays behind its rewrite yield.
++        coordinator.unlock_pager_commit_lock();
++        assert!(step_to_done(&mut commit, 100_000), "L did not finish");
++        commit_l = Some(commit);
++    }
++
++    // F steps until it is Committed in txs and a step returned: the rewrite
++    // yielded after 1024 rows.
++    let mut in_window = false;
++    for _ in 0..100_000 {
++        match commit_f.step().unwrap() {
++            StepResult::Done => panic!("COMMIT of F finished before the rewrite window"),
++            StepResult::IO | StepResult::Yield => {
++                if matches!(
++                    store.txs.get(&tx_f).unwrap().value().state.load(),
++                    TransactionState::Committed(_)
++                ) {
++                    in_window = true;
++                    break;
++                }
++            }
++            other => panic!("unexpected step result {other:?}"),
++        }
++    }
++    assert!(in_window, "F never reached Committed with a yield");
++    drop(commit_l);
++
++    // B commits while F is between CommitEnd and FinalizeCommit. With group
++    // commit B leads alone. Without it the commit lock is held by F, so B
++    // cannot commit and the test skips B.
++    let conn_c = db.connect();
++    if group_commit {
++        let conn_b = db.connect();
++        conn_b.execute("BEGIN CONCURRENT").unwrap();
++        conn_b.execute("INSERT INTO t VALUES (5000, 1)").unwrap();
++        let mut commit_b = conn_b.prepare("COMMIT").unwrap();
++        assert!(
++            step_to_done(&mut commit_b, 20_000),
++            "B did not finish while F is in the window: last_committed {}",
++            store.last_committed_tx_ts.load(Ordering::SeqCst)
++        );
++    }
++
++    // A pass in the window.
++    let mut checkpoint = conn_c.prepare("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    let ck_done = step_to_done(&mut checkpoint, 20_000);
++    println!("group_commit = {group_commit}: pass in the window finished: {ck_done}");
++    drop(checkpoint);
++
++    // F finishes its rewrite. R ends. Three more passes run.
++    assert!(step_to_done(&mut commit_f, 100_000), "F did not finish");
++    drop(commit_f);
++    reader.execute("COMMIT").unwrap();
++    for _ in 0..3 {
++        conn_c.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    }
++
++    let check = db.connect();
++    let want = if group_commit { 1102 } else { 1100 };
++    assert_eq!(
++        get_rows(&check, "SELECT count(*) FROM t")[0][0]
++            .as_int()
++            .unwrap(),
++        want
++    );
++    let left = table_versions_left(&store, table_id);
++    println!("group_commit = {group_commit}: {left} row versions of t left in mv_store.rows");
++    left
++}
++
++#[test]
++fn group_commit_rewrite_window_keeps_checkpoint_stamps() {
++    let left = run_rewrite_window_checkpoint_test(true);
++    assert_eq!(
++        left, 0,
++        "the TxID rewrite reset materialized_at after a pass stamped the rows: {left} row versions stay in memory"
++    );
++}
++
++#[test]
++fn serialized_commit_rewrite_window_keeps_checkpoint_stamps() {
++    let left = run_rewrite_window_checkpoint_test(false);
++    assert_eq!(left, 0, "control without group commit: {left} row versions left");
++}
