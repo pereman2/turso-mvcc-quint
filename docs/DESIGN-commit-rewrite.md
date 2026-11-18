@@ -36,19 +36,27 @@ pin).
 
 ## When the window opens
 
-Without group commit, a commit takes `pager_commit_lock` before its log write
-(mod.rs:3422-3427) and holds it until `FinalizeCommit` (mod.rs:3669). No later
-commit can finish inside the window. So `last_committed_tx_ts < end_ts`, the
-pass skips the commit, and nothing is stamped in the window. This explains
-the probe of gap 22: it ran without group commit, and 0 versions were left.
+The window matters when a commit with a higher timestamp finishes while a
+commit with a lower timestamp is in the window. Then `last_committed_tx_ts` is
+at or above the commit in the window, and a pass collects it. Two paths lead
+there.
 
-With group commit (`PRAGMA mvcc_group_commit`, mod.rs:3405-3416), a leader
-takes the lock and writes the queued records of other commits. Its own record
-ends in `SyncLogicalLog` (mod.rs:1970-1976), so the leader keeps the lock until
-its own `FinalizeCommit`. A follower, whose record a leader wrote, reaches
-`CommitEnd` with no lock. So a follower can be in the window while a commit
-with a higher timestamp finishes. Example with follower T1 at ts 10 and T2 at
-ts 11:
+Out of order, with no group commit. A commit takes `end_ts` in its validation
+step (mod.rs:3117). That is before `BuildLogRecord`, which yields after 1024
+rows, and before it takes `pager_commit_lock` (mod.rs:3422-3427). So T1 can
+take ts 10 and wait in `BuildLogRecord`, while T2 takes ts 11 and commits to
+the end. T1 then takes the lock and reaches `CommitEnd`. The lock does not stop
+the pass, because the pass does not take it.
+
+Group commit (`PRAGMA mvcc_group_commit`, mod.rs:3405-3416). A leader takes
+the lock and writes the queued records of other commits. Its own record ends
+in `SyncLogicalLog` (mod.rs:1970-1976), so the leader keeps the lock until its
+own `FinalizeCommit`. A follower, whose record a leader wrote, reaches
+`CommitEnd` with no lock.
+
+If commits finish in timestamp order, `last_committed_tx_ts < end_ts`, and the
+pass skips the commit in the window. The probe of gap 22 had this order, so it
+left 0 versions. Example with T1 at ts 10 and T2 at ts 11:
 
 ```
 T1: CommitEnd(10) -- rewrite chunk 1 (rows 1..1024) -- yield ...... rewrite rows 1025..1100 (mat := 0)
@@ -125,24 +133,28 @@ Configurations, based on `dirtyKeys`:
 | `rewriteGroupCommit` | group commit, reset on | `NoStrandedVersions` fails |
 | `rewriteGroupCommitFixed` | group commit, reset off | no error, `Safety` |
 | `reachRewriteStamped` | as fixed | `NeverRewritesStamped` fails |
-| `rewriteSerialized` | `LogAppendOneAtATime`, reset on | no error, `Safety` |
+| `rewriteSerialized` | `LogAppendOneAtATime`, 2 keys, reset on | `NoStrandedVersions` fails |
+| `rewriteSerializedFixed` | as above, reset off | no error, `Safety` |
 | `mbtRewrite` | as `mbt`, split on, one writer at a time | traces only |
 
 ## Replay
 
-The row replay drives one logged writer at a time, so it replays
-`mbtRewrite` traces, where the window exists but nothing is stamped in it.
+The row replay drives one logged writer at a time. With two keys, the
+`mbtRewrite` traces still reach the out-of-order case.
 `WriteCommitEnd` stops at a new test yield point at the start of
 `step_rewrite_live_versions`. That point needs a `#[cfg(test)]` hook in
 `harness/turso-hooks.patch`, because a one-row write set never yields there.
 `WriteRewriteTxId` stops at `BeforeGlobalHeaderUpdate`. `WriteFinalize` runs
 the old `WriteFinish` code.
 
-The group commit leak is shown by a Rust test instead
-(`harness/repro/commitend-rewrite-leak.patch`). The commits use SQL, and a
-1100-row commit gives the window, because the rewrite yields after 1024 rows.
-The test is single-threaded, so it holds `pager_commit_lock` by hand until a
-leader and a follower are both queued. In a real workload, two threads queue
-them. The test reads `MvStore::rows` to count versions. It needs no
-`#[cfg(test)]` hook, but it needs these crate-internal reads, so it is a test
-inside `turso_core`.
+The trace `rewrite-window-reset.itf.json` has a pass that stamps a version in
+the window, and the rewrite then resets it. The replay compares the number of
+stamped versions of the key after `WriteRewriteTxId`.
+
+The Rust tests are in `harness/repro/commitend-rewrite-leak.patch`. The commits
+use SQL, and a 1100-row commit gives the window, because the rewrite yields
+after 1024 rows. The out-of-order test needs no lock by hand. The group commit
+test is single-threaded, so it holds `pager_commit_lock` by hand until a leader
+and a follower are both queued. Both tests read `MvStore::rows` to count
+versions and `txs` to find the window. They need no `#[cfg(test)]` hook, but
+they need these crate-internal reads, so they are tests inside `turso_core`.
