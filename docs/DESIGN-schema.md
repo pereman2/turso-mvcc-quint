@@ -801,6 +801,52 @@ Left out:
 - a publish between `canonical_log_id` and the map build. That needs a commit
   on another thread, or a write set over 1024 entries (`mod.rs:2700-2703`).
 
+## Rowid allocator cache
+
+Gap 13. `MvStore::table_id_to_last_rowid` (`core/mvcc/database/mod.rs:4506`)
+maps a table id to a `RowidAllocator`. An allocator that is not initialized
+reads the largest rowid that the snapshot of its transaction sees
+(`op_new_rowid`, `core/vdbe/execute.rs:12669-12744`). Then it gives
+`max_rowid + 1` (`get_next_rowid`, `mod.rs:10615`). The cache of a key goes
+away in three places: the publish window (`remove_table_id_to_rootpage`,
+`mod.rs:4814-4817`), `gc_rootpage_entries` (`mod.rs:4892-4907`, called from
+`checkpoint.rs:3391`) and VACUUM (out of scope).
+
+The safety argument has two parts. A cache is dropped only for a table id that
+no live table has. The key of a live table never changes, because a
+checkpoint that gives a table a page keeps its id (`record_rootpage_alloc`,
+`mod.rs:4831`). A cache keyed by root page (`get_real_table_id`,
+`mod.rs:10487`) would break the second part.
+
+The constant `RowidCache` is `"off"` (no new behavior, old modules keep their
+state spaces), `"on"` (the code, key = `tid[o]`) or `"keyByRoot"` (a mutation,
+key = the page of the binding). New variables: `rcache` (key to `max_rowid`),
+`rows` (committed rows as table id and rowid) and `wr` (the uncommitted row of
+writers `w1` and `w2`). `RowAlloc` takes the cache value, or the committed max
+when the key has no cache, and adds one. `RowCommit` and `RowAbort` end the
+row. The cache drops its key in `ApplyCheckpointPublish` (the `remove` ops) and
+in `CheckpointFinish` (each binding that GC drops). A DROP waits for the
+writers of its table. `WriteRow` is off when the cache is on. `NoRowidReuse`
+says that no writer holds a rowid that a committed row or another writer has.
+
+| Module | Result |
+|---|---|
+| `rowidCache` | TLC_ROWIDCACHE |
+| `rowidKeyByRoot` | TLC_KEYBYROOT |
+| `reachRowidAcrossPublish`, `reachRowidPendingPair`, `reachRowidCacheGc` | TLC_REACH |
+| `main`, `reachStableIdChanges` with `RowidCache = "off"` | TLC_OFF |
+
+The `keyByRoot` counterexample: `w1` allocates rowid 1 and does not commit, a
+checkpoint publishes page 2, and `w2` finds no cache under key 2, reads the
+committed max 0 and gets rowid 1. The engine replay of `reachRowidAcrossPublish`
+and `reachRowidPendingPair` (`rowid_cache_traces_conform`) gives the same rowids
+as the spec for `"on"`. It cannot show the GC drop through rowids, because a
+dropped table takes no more writes. Left out: deletes and rowid reuse, VACUUM,
+restart and recovery bumps, rollback restores, the random rowid fallback at
+`i64::MAX`, indexes. `RowidAcrossPublish` is a weak tag: it marks an allocation
+after the publish of a table that already has a row, not the order of the row
+and the publish.
+
 ## Not modeled
 
 - `index_id_to_index` keyed by a binding other than the index's own (S18).

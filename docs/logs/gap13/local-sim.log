@@ -1,0 +1,7 @@
+Local quint run (rust simulator, seed 1, 200000 samples, 40 steps). Not TLC.
+rowidKeyByRoot: [violation] NoRowidReuse (17 states trace)
+reachRowidAcrossPublish: [violation] NeverRowidAcrossPublish (17 states trace)
+reachRowidPendingPair: [violation] NeverRowidPendingPair (8 states trace)
+reachRowidCacheGc: [violation] NeverCacheGcDropped (25 states trace)
+rowidCache and main, TypeOK, 200 samples x 30 steps: no violation
+The TLC runs and the engine replay did not run: no Mac slot came free.

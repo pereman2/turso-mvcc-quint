@@ -32,6 +32,8 @@ pub(super) struct SchemaDriver {
     ddl_stop: Arc<StopAt>,
     ddl: Option<Ddl>,
     writer: Arc<Connection>,
+    /// The connection of each spec rowid writer (RowAlloc to RowCommit or RowAbort).
+    row_writers: HashMap<String, Arc<Connection>>,
     /// Reads the live sqlite_schema after each step of a sync trace.
     probe: Arc<Connection>,
     /// The steps after which check_root_columns compared the live rootpages.
@@ -60,6 +62,9 @@ impl Driver for SchemaDriver {
             "DdlPrepare" => self.ddl_prepare()?,
             "DdlFinish" => self.ddl_finish(step)?,
             "WriteRow" => self.write_row(step)?,
+            "RowAlloc" => self.row_alloc(step)?,
+            "RowCommit" => self.row_end(step, "COMMIT"),
+            "RowAbort" => self.row_end(step, "ROLLBACK"),
             "ReaderPrepare" | "ReaderOpen" | "ReaderRead" => {}
             "ReaderPin" => self.reader_pin(step),
             "ReaderBegin" => self.reader_begin(step)?,
@@ -140,6 +145,7 @@ impl SchemaDriver {
             ddl: None,
             writer,
             probe,
+            row_writers: HashMap::new(),
             root_checked_steps: Vec::new(),
             readers: HashMap::new(),
             schema_rowids: HashMap::new(),
@@ -423,6 +429,41 @@ impl SchemaDriver {
         self.gc_chain_with(table, row_id, lwm, floor)
     }
 
+    /// The writer begins a transaction, inserts a row with no rowid, and
+    /// compares the rowid the engine picked with the spec value `wr[w].n`.
+    /// The row has v = NULL, so the recovery check ignores it.
+    fn row_alloc(&mut self, step: &Step) -> StepOutcome {
+        let writer = step.pick("w").str();
+        let table = step.pick("o").str();
+        let want = step.var("wr").get_str(writer).field("n").int();
+        let db = &self.db;
+        let conn = self
+            .row_writers
+            .entry(writer.to_string())
+            .or_insert_with(|| db.connect())
+            .clone();
+        conn.execute("BEGIN CONCURRENT").unwrap();
+        conn.execute(format!("INSERT INTO {table}(v) VALUES (NULL)"))
+            .unwrap_or_else(|err| panic!("{writer}: INSERT INTO {table} failed: {err}"));
+        let rows = query_rows(&conn, "SELECT last_insert_rowid()").unwrap();
+        let got = rows[0][0].as_int().unwrap();
+        if got != want {
+            return fail(
+                Failure::Rowid,
+                format!("{writer}: the engine gave rowid {got} in {table}, the spec gives {want}"),
+            );
+        }
+        Ok(())
+    }
+
+    /// RowCommit and RowAbort end the transaction of a writer.
+    fn row_end(&mut self, step: &Step, sql: &str) {
+        let writer = step.pick("w").str();
+        self.row_writers[writer]
+            .execute(sql)
+            .unwrap_or_else(|err| panic!("{writer}: {sql} failed: {err}"));
+    }
+
     fn write_row(&mut self, step: &Step) -> StepOutcome {
         let table = step.pick("o").str();
         let ts = step.var("ins").get_str(table).field("ts").int();
@@ -684,7 +725,7 @@ fn recovered_tables(
     for row in query_rows(conn, "SELECT name FROM sqlite_schema WHERE type = 'table'")? {
         let name = row[0].to_string();
         if tables.contains(&name) {
-            let rows = query_rows(conn, &format!("SELECT v FROM {name}"))?;
+            let rows = query_rows(conn, &format!("SELECT v FROM {name} WHERE v IS NOT NULL"))?;
             let value = rows.first().map(|row| row[0].as_int().unwrap());
             recovered.insert(name, value);
         }
@@ -846,6 +887,36 @@ fn sync_traces_conform() {
             // The CheckpointPublish that gives the table its page.
             assert!(driver.root_checked_steps.contains(&24), "{name}: step 24 not checked");
         }
+    }
+}
+
+/// Rowid allocator cache traces (gap 13). A spec writer is a connection with
+/// `BEGIN CONCURRENT`, one INSERT with no rowid, and the rowid from
+/// `last_insert_rowid()`. The driver compares it with the spec rowid at each
+/// RowAlloc.
+/// - reachRowidAcrossPublish: writer w1 allocates a rowid and does not commit,
+///   a checkpoint publishes the page of the table, and writer w2 gets the next
+///   rowid. The engine cache survives the publish.
+/// - reachRowidPendingPair: two writers hold uncommitted rows of one table.
+/// The `rowidKeyByRoot` trace is a mutation of the code. It is not replayed.
+#[cfg(feature = "conn_raw_api")]
+const ROWID_TRACES: [(&str, &str); 2] = [
+    (
+        "MvccPassiveSchema-reachRowidAcrossPublish",
+        include_str!("traces/MvccPassiveSchema-reachRowidAcrossPublish.itf.json"),
+    ),
+    (
+        "MvccPassiveSchema-reachRowidPendingPair",
+        include_str!("traces/MvccPassiveSchema-reachRowidPendingPair.itf.json"),
+    ),
+];
+
+#[cfg(feature = "conn_raw_api")]
+#[test]
+fn rowid_cache_traces_conform() {
+    for (name, trace) in ROWID_TRACES {
+        let replayed = replay(name, trace, Expect::Conforms, &mut SchemaDriver::new());
+        assert_eq!(replayed, Replay::Done, "{name} was refused");
     }
 }
 

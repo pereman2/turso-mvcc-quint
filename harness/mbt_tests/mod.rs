@@ -104,6 +104,9 @@ enum Failure {
     /// The live sqlite_schema.rootpage of a table differs from the form of
     /// the spec RootCol, or two live tables have the same abs(rootpage).
     RootPage,
+    /// `last_insert_rowid()` after an INSERT differs from the rowid that the
+    /// spec rowid allocator gave the writer.
+    Rowid,
 }
 
 /// Why a replay stopped before the end of the trace.

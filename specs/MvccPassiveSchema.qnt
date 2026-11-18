@@ -115,6 +115,9 @@ module MvccPassiveSchema {
   const CheckpointOwnerReaders: bool // a checkpoint can run on the connection of an open reader
   const GcSamplesFirst: bool    // GC samples lwm and the floor, then applies the rules per chain
   const SyncObjectMap: bool     // true: each row commit records its object map (portable changes).
+  const RowidCache: str         // "off": no rowid allocator cache in the model. "on": the code,
+                                // the cache is keyed by the table id. "keyByRoot": a mutation,
+                                // the key is the page of the published binding.
 
   // Special cases of the code today. true in the main configuration.
   const GuardMatCheck: bool          // is_btree_readable_at: materialized_at <= read_mark
@@ -196,6 +199,9 @@ module MvccPassiveSchema {
   // lock (pager.rs:3474-3475). Its MVCC snapshot stays in txs.
   type RdState = { pc: str, o: str, root: int, gen: int, cookie: int, mark: int, pm: int,
                    b: int, tid: str, unpinned: bool }
+  // A writer's uncommitted row: n = its rowid (0 = idle), t = the table id of
+  // its table, k = the cache key that gave the rowid.
+  type Wr = { k: int, t: int, n: int }
   type LogRec = { o: str, kind: str, ts: int, root: int }
   type ErrRec = { kind: str, reader: str, o: str, b: int, tid: str, mark: int, got: int,
                   want: int, btree: str, snap: int }
@@ -236,6 +242,9 @@ module MvccPassiveSchema {
   var ddlLog: Set[LogRec]        // History: finished DDL commits (in the logical log).
   var seen: Set[str]             // History: outcomes that the reachability checks look for.
   var err: Set[ErrRec]           // History: wrong reads and panics.
+  var rcache: int -> int         // table_id_to_last_rowid: cache key -> max_rowid.
+  var rows: Set[(int, int)]      // Committed rows: (table id, rowid).
+  var wr: str -> Wr              // wr[w]: the uncommitted row of writer w.
   var gcs: GcState               // The GC sample when GC runs in steps (GcSamplesFirst).
 
   // ---------------------------------------------------------------------------
@@ -248,6 +257,9 @@ module MvccPassiveSchema {
   pure val NoCat: Cat = { c: 0, d: Inf, a: 0, r1: 0, r2: 0 }
   pure val NoIns: Ins = { ts: 0, id: 0 }
   pure val NoSCat: SCat = { gone: false, mat: 0, tomb: false }
+  pure val IdleWr: Wr = { k: 0, t: 0, n: 0 }
+  pure val RowWriters: Set[str] = if (RowidCache == "off") Set() else Set("w1", "w2")
+  pure val MaxRowid = 2
 
   // An ErrRec with only the fields that every kind has.
   pure def ErrOf(kind: str, reader: str, o: str, b: int): ErrRec =
@@ -354,6 +366,9 @@ module MvccPassiveSchema {
     seen' = Set(),
     err' = Set(),
     gcs' = IdleGc,
+    rcache' = Map(),
+    rows' = Set(),
+    wr' = RowWriters.mapBy(w => IdleWr),
   }
 
   // Keeps the schema variables as they are.
@@ -364,7 +379,12 @@ module MvccPassiveSchema {
   }
 
   // Keeps the row variables as they are.
-  action UnchangedRowVars = all { chain' = chain, ins' = ins, scat' = scat, omap' = omap }
+  action UnchangedRowVars = all {
+    chain' = chain, ins' = ins, scat' = scat, omap' = omap, UnchangedRowidVars,
+  }
+
+  // Keeps the rowid cache variables as they are.
+  action UnchangedRowidVars = all { rcache' = rcache, rows' = rows, wr' = wr }
 
   // Keeps the store variables as they are.
   action UnchangedStoreVars = all {
@@ -396,6 +416,8 @@ module MvccPassiveSchema {
     else if (kind == "drop") and {
       pub.get(o) != 0, cat.get(o).d == Inf,
       LiveIndexes(o) == Set(),
+      // A DROP does not commit while a writer holds a row of the table.
+      RowWriters.forall(w => wr.get(w).t != tid.get(o) or wr.get(w).n == 0),
     }
     else and {
       kind == "alter",
@@ -415,7 +437,7 @@ module MvccPassiveSchema {
     bind' = if (kind == "create") bind.set(o, { ...NoBind, in: true }) else bind,
     clock' = clock, lastCommitted' = lastCommitted, cookie' = cookie,
     pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots,
-    ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap,
+    ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap, UnchangedRowidVars,
     // The statement writes a version of the sqlite_schema row with a TxID,
     // and the stamp goes back to none (mod.rs:10989-11002). A chain that GC
     // dropped gets a tombstone for the B-tree row (mod.rs:5759-5809).
@@ -444,7 +466,7 @@ module MvccPassiveSchema {
                else { ...x, a: ts }),
       lastCommitted' = lastCommitted, cookie' = cookie, pubCookie' = pubCookie,
       gen' = gen, pub' = pub, droppedRoots' = droppedRoots, nextId' = nextId, tid' = tid,
-      ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap,
+      ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap, UnchangedRowidVars,
       // The commit rewrites the TxID of its version, which resets the stamp.
       scat' = if (CatalogReads) scat.setBy(ddl.o, x => { ...x, mat: 0 }) else scat,
       UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
@@ -557,6 +579,9 @@ module MvccPassiveSchema {
     val ts = clock + 1
     val ws = Set(o).union(LiveIndexes(o))
     all {
+      // With the rowid cache the writers are RowAlloc and RowCommit. The row
+      // of this action has key 1 and does not move the cache.
+      RowidCache == "off",
       ddl.pc == "none",
       not(Indexes.contains(o)),
       cat.get(o).c != 0, cat.get(o).d == Inf, pub.get(o) != 0,
@@ -587,7 +612,84 @@ module MvccPassiveSchema {
                            and MapNames(LogId(o)) != Set())
                          Set("MapFromBinding") else Set()),
       UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, err' = err,
+      UnchangedRowidVars,
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rowid allocator cache (gap 13)
+  //
+  // MvStore::table_id_to_last_rowid maps a table id to a RowidAllocator
+  // (mod.rs:4506, 4022). MvCursor::start_new_rowid takes the allocator; one
+  // that is not initialized reads the largest rowid that the snapshot of the
+  // transaction sees (op_new_rowid, execute.rs:12669-12744). Then the rowid is
+  // max_rowid + 1 (get_next_rowid, mod.rs:10615). The model has two writers.
+  // Each one allocates one rowid, then commits or aborts. RowidCache = "off"
+  // turns all of this off.
+
+  // The cache key of the table o. "on": its table id, which never changes.
+  // "keyByRoot": the page of its binding (get_real_table_id, mod.rs:10487), or
+  // the table id while it has no page.
+  def CacheKey(o: str): int =
+    if (RowidCache == "keyByRoot" and bind.get(o).in and bind.get(o).root > 0)
+      bind.get(o).root
+    else tid.get(o)
+
+  def RowsOf(t: int): Set[int] = rows.filter(r => r._1 == t).map(r => r._2)
+
+  def HeldBy(t: int): Set[str] = RowWriters.filter(x => wr.get(x).n != 0 and wr.get(x).t == t)
+
+  pure def DropKeys(rc: int -> int, ks: Set[int]): int -> int =
+    rc.keys().exclude(ks).mapBy(k => rc.get(k))
+
+  action RowAlloc(w: str, o: str): bool = {
+    val t = tid.get(o)
+    val k = CacheKey(o)
+    val cached = rcache.keys().contains(k)
+    val base = if (cached) rcache.get(k) else Max(Set(0).union(RowsOf(t)))
+    all {
+      RowidCache != "off",
+      RowWriters.contains(w),
+      wr.get(w).n == 0,
+      not(Indexes.contains(o)),
+      cat.get(o).c != 0, cat.get(o).d == Inf, pub.get(o) != 0,
+      ddl.pc == "none",
+      base < MaxRowid,
+      rcache' = rcache.put(k, base + 1),
+      wr' = wr.set(w, { k: k, t: t, n: base + 1 }),
+      rows' = rows,
+      seen' = seen
+        .union(Set("RowidAllocated"))
+        .union(if (HeldBy(t) != Set()) Set("RowidPendingPair") else Set())
+        .union(if (not(cached) and base > 0) Set("RowidReinit") else Set())
+        .union(if (pub.get(o) > 0 and (RowsOf(t) != Set() or HeldBy(t) != Set()))
+                 Set("RowidAcrossPublish") else Set()),
+      clock' = clock, lastCommitted' = lastCommitted,
+      UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, err' = err,
+      chain' = chain, ins' = ins, scat' = scat, omap' = omap,
+    }
+  }
+
+  action RowCommit(w: str): bool = all {
+    RowWriters.contains(w),
+    wr.get(w).n != 0,
+    rows' = rows.union(Set((wr.get(w).t, wr.get(w).n))),
+    wr' = wr.set(w, IdleWr),
+    rcache' = rcache,
+    clock' = clock, lastCommitted' = lastCommitted,
+    UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+    chain' = chain, ins' = ins, scat' = scat, omap' = omap,
+  }
+
+  // The cache keeps its value, which is safe because it only goes up.
+  action RowAbort(w: str): bool = all {
+    RowWriters.contains(w),
+    wr.get(w).n != 0,
+    wr' = wr.set(w, IdleWr),
+    rcache' = rcache, rows' = rows,
+    clock' = clock, lastCommitted' = lastCommitted,
+    UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+    chain' = chain, ins' = ins, scat' = scat, omap' = omap,
   }
 
   // ---------------------------------------------------------------------------
@@ -1081,7 +1183,7 @@ module MvccPassiveSchema {
       bind' = bind, nBackfill' = nBackfill, db' = db, durable' = durable,
       backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars,
-      ins' = ins, omap' = omap, seen' = seen,
+      ins' = ins, omap' = omap, UnchangedRowidVars, seen' = seen,
       err' = err,
     }
   }
@@ -1112,6 +1214,10 @@ module MvccPassiveSchema {
                and AllocPages.contains(AfterRetire.get(x).root))
         { ...AfterRetire.get(x), end: ck.snap }
       else AfterRetire.get(x))
+
+  // remove_table_id_to_rootpage drops the cache of its key (mod.rs:4814-4817).
+  val RemoveKeys: Set[int] =
+    ck.ops.filter(op => op.op == "remove").map(op => CacheKey(op.o))
 
   // bump_next_table_id_below: ids handed out later stay below -page.
   val BumpedId: int =
@@ -1177,6 +1283,7 @@ module MvccPassiveSchema {
     Mode == "truncateFlagOn",
     ck.pc == "committed",
     bind' = AfterAlloc,
+    rcache' = DropKeys(rcache, RemoveKeys),
     nextId' = BumpedId,
     durable' = Max(Set(ck.old, ck.snap)),
     ck' = { ...ck, pc: "roots", pending: Set(),
@@ -1185,7 +1292,8 @@ module MvccPassiveSchema {
                      else ck.history },
     clock' = clock, lastCommitted' = lastCommitted, cat' = cat, ddl' = ddl, cookie' = cookie,
     pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots, tid' = tid,
-    ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill, db' = db,
+    ddlLog' = ddlLog, chain' = chain, ins' = ins, scat' = scat, omap' = omap,
+    rows' = rows, wr' = wr, wal' = wal, nBackfill' = nBackfill, db' = db,
     backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs, rd' = rd, seen' = seen, err' = err,
   }
 
@@ -1251,6 +1359,7 @@ module MvccPassiveSchema {
     val dr1 = if (GuardFreedOnly) droppedRoots.exclude(ck.freed) else Set()
     all {
       bind' = nb,
+      rcache' = DropKeys(rcache, RemoveKeys),
       // Without GuardPatchKeepsEnd the collected clone replaces the
       // row, and its end is the clamped "live" one.
       cat' = Objs.mapBy(o => {
@@ -1274,7 +1383,8 @@ module MvccPassiveSchema {
                    ck.history.union(Set("failedCommitted", "cleanupPublished"))
                  else ck.history },
       clock' = clock, lastCommitted' = lastCommitted, ddl' = ddl, pubCookie' = pubCookie,
-      tid' = tid, ddlLog' = ddlLog, UnchangedRowVars, wal' = wal, nBackfill' = nBackfill,
+      tid' = tid, ddlLog' = ddlLog, chain' = chain, ins' = ins, scat' = scat, omap' = omap,
+      rows' = rows, wr' = wr, wal' = wal, nBackfill' = nBackfill,
       db' = db, backfillFloor' = backfillFloor, nCk' = nCk, rd' = rd, seen' = seen,
       err' = err, gcs' = gcs,
     }
@@ -1351,6 +1461,12 @@ module MvccPassiveSchema {
 
   // TruncateWal and the stamp: set backfill_floor, stamp the row versions
   // that this pass wrote, and drop retired bindings (gc_rootpage_entries).
+  def BindingGcDrops(x: str): bool =
+    bind.get(x).in and bind.get(x).end != Inf
+      and (not(GuardBindingGcLwm) or bind.get(x).end <= Lwm)
+
+  val GcKeys: Set[int] = Objs.filter(x => BindingGcDrops(x)).map(x => CacheKey(x))
+
   action CheckpointFinish: bool = all {
     ck.pc == "truncated",
     backfillFloor' = nBackfill,
@@ -1362,14 +1478,16 @@ module MvccPassiveSchema {
     // row, with the pager-pinned readers and the new backfill_floor as the
     // floor (gc_floor_reader_mark, checkpoint_state_machine.rs:2237-2250).
     scat' = FinishCatalog,
-    seen' = if (Objs.exists(o => FinishCatalog.get(o).gone and not(scat.get(o).gone)
-                                 and CatDropped(o)))
-              seen.union(Set("CatalogGcDropped")) else seen,
-    bind' = Objs.mapBy(x =>
-              if (bind.get(x).in and bind.get(x).end != Inf
-                  and (not(GuardBindingGcLwm) or bind.get(x).end <= Lwm))
-                NoBind
-              else bind.get(x)),
+    seen' = (if (Objs.exists(o => FinishCatalog.get(o).gone and not(scat.get(o).gone)
+                                  and CatDropped(o)))
+               seen.union(Set("CatalogGcDropped")) else seen)
+              .union(if (GcKeys.intersect(rcache.keys()) != Set()) Set("CacheGcDropped")
+                     else Set()),
+    bind' = Objs.mapBy(x => if (BindingGcDrops(x)) NoBind else bind.get(x)),
+    // gc_rootpage_entries drops the cache of the key of each binding it drops
+    // (mod.rs:4892-4907).
+    rcache' = DropKeys(rcache, GcKeys),
+    rows' = rows, wr' = wr,
     ck' = { ...IdleCk, history: ck.history },
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
     omap' = omap,
@@ -1419,7 +1537,7 @@ module MvccPassiveSchema {
     Lwm == Inf,
     chain' = chain.set(o, Set()),
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
-    scat' = scat, omap' = omap, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+    scat' = scat, omap' = omap, UnchangedRowidVars, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
   }
 
   // gc_version_chain on the sqlite_schema row of o (table id -1). The model
@@ -1460,7 +1578,7 @@ module MvccPassiveSchema {
       scat' = scat.set(o, { ...NoSCat, gone: true }),
       seen' = if (CatDropped(o)) seen.union(Set("CatalogGcDropped")) else seen,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, chain' = chain,
-      ins' = ins, omap' = omap, UnchangedStoreVars, rd' = rd, err' = err,
+      ins' = ins, omap' = omap, UnchangedRowidVars, UnchangedStoreVars, rd' = rd, err' = err,
     }
   }
 
@@ -1498,7 +1616,7 @@ module MvccPassiveSchema {
 
   action UnchangedForGc = all {
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
-    omap' = omap, bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    omap' = omap, UnchangedRowidVars, bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
     backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, err' = err,
   }
 
@@ -1599,6 +1717,16 @@ module MvccPassiveSchema {
     DdlFinish,
     nondet o = Objs.oneOf()
     WriteRow(o),
+    all {
+      RowidCache != "off",
+      nondet w = RowWriters.oneOf()
+      any {
+        nondet o = Objs.oneOf()
+        RowAlloc(w, o),
+        RowCommit(w),
+        RowAbort(w),
+      },
+    },
     all {
       Readers != Set(),
       nondet r = Readers.oneOf()
@@ -1845,6 +1973,16 @@ module MvccPassiveSchema {
       tuples(Objs, Objs).forall(((x, y)) =>
         (x != y and LiveTable(x) and LiveTable(y)) implies Abs(RootCol(x)) != Abs(RootCol(y)))
 
+  // Rowid allocator cache: a writer never holds a rowid that a committed row
+  // of its table has, or that another writer holds. The model has no deletes,
+  // so a second allocation of a rowid in use is exactly this.
+  val NoRowidReuse: bool =
+    RowWriters.forall(w => wr.get(w).n != 0 implies and {
+      not(rows.contains((wr.get(w).t, wr.get(w).n))),
+      RowWriters.forall(x => x == w or wr.get(x).n == 0 or wr.get(x).t != wr.get(w).t
+                             or wr.get(x).n != wr.get(w).n),
+    })
+
   val TypeOK: bool = and {
     0.to(MaxTs).contains(clock),
     0.to(wal.length()).contains(nBackfill),
@@ -1925,6 +2063,12 @@ module MvccPassiveSchema {
   val NeverGcAfterBegin: bool = not(seen.contains("GcAfterBegin"))
   // GC drops a chain while a reader pinned a WAL mark and is not in txs yet.
   val NeverGcWithPinned: bool = not(seen.contains("GcWithPinned"))
+  // Two writers hold uncommitted rows of one table.
+  val NeverRowidPendingPair: bool = not(seen.contains("RowidPendingPair"))
+  // A rowid is allocated after the publish of a table that has rows.
+  val NeverRowidAcrossPublish: bool = not(seen.contains("RowidAcrossPublish"))
+  // The GC of a retired binding dropped a cache entry.
+  val NeverCacheGcDropped: bool = not(seen.contains("CacheGcDropped"))
   // A negative schema root with a root page outlives the publish.
   val NeverOwnedNegative: bool =
     ck.pc == "idle" implies

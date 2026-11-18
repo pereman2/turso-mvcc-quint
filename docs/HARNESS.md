@@ -265,6 +265,7 @@ builds the object map only with it. Run them with
 |---|---|---|---|
 | `sync_traces_conform` | `reachMapsPageId` | Conforms | A row record carries `-page`, and the object map names its table |
 | `sync_traces_conform` | `reachStableIdChanges` | Conforms | A row record carried the temporary id, and the `rootpage` column now holds the page. The rootpage check runs at step 24 (`CheckpointPublish`) |
+| `rowid_cache_traces_conform` | `reachRowidAcrossPublish`, `reachRowidPendingPair` | Conforms | Each spec writer is a connection with `BEGIN CONCURRENT` and an `INSERT` with no rowid. `last_insert_rowid()` must equal the spec rowid `wr[w].n` at each `RowAlloc`. The cache survives the checkpoint publish (`Failure::Rowid` otherwise). Run it with `mbt_tests::schema::rowid_cache` |
 | `map_in_pass_trace_conforms_until_issue_11502` | `reachMapsInPass` | `RecoveryRows` at step 19 | A row commits with its temporary id while a pass that creates its B-tree is open. The object map names the table. After a crash, recovery loses the row (#11502) |
 | `issue_8004_sync_trace_fails_insert` | `issue8004Sync` | `ObjectMap` at step 18 | The `INSERT` fails with `Corrupt`, and the spec has `omap = "-"` at that step |
 
