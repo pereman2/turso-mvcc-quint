@@ -53,7 +53,10 @@ module main {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -108,7 +111,10 @@ module mbt {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -161,7 +167,10 @@ module abortsKeepMaterialized {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -214,7 +223,10 @@ module abortsNoDependency {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -267,7 +279,10 @@ module aborts {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -320,7 +335,10 @@ module dirtyClearFullScanEarly {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -373,7 +391,10 @@ module dirtyKeys {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -426,7 +447,10 @@ module dirtyMarkAfterCommit {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -479,7 +503,10 @@ module dirtyNoGenerationCas {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -531,7 +558,10 @@ module floorBackfill {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -583,7 +613,10 @@ module floorPinned {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -636,7 +669,10 @@ module floorRegistered {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -689,7 +725,10 @@ module gcSampleNoRecheck {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -742,7 +781,10 @@ module gcSample {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -794,7 +836,10 @@ module noBackfillStop {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -846,7 +891,10 @@ module noGcWait {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -898,7 +946,10 @@ module noSnapshotClamp {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -951,7 +1002,10 @@ module rule3UnderLoadOneLook {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1004,7 +1058,10 @@ module rule3UnderLoad {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1058,7 +1115,10 @@ module ownCheckpoint {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1111,7 +1171,10 @@ module ownCheckpointBackfillFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1164,7 +1227,10 @@ module ownCheckpointKeepsMark {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1217,7 +1283,10 @@ module ownCheckpointKeepsMarkBackfillFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1270,7 +1339,10 @@ module ownCheckpointGc {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1323,7 +1395,10 @@ module ownCheckpointGcBackfillFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1376,7 +1451,10 @@ module ownCheckpointGcPinnedFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1429,7 +1507,10 @@ module reachStampedAboveReader {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1482,7 +1563,10 @@ module reachReaderMarkBelowFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1534,7 +1618,10 @@ module failedPublish {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1586,7 +1673,10 @@ module failedPublishFixed {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1638,7 +1728,10 @@ module reachFailedPublish {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1690,7 +1783,10 @@ module reachRepairedVersions {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1742,7 +1838,10 @@ module logTruncateRace {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1794,7 +1893,10 @@ module reachTruncateAppend {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1846,7 +1948,10 @@ module logTruncateAtomic {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1898,7 +2003,10 @@ module truncateFlagOn {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1950,7 +2058,10 @@ module truncateFlagOnFixed {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2002,7 +2113,10 @@ module reachTruncateRepair {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2054,7 +2168,10 @@ module refuseCheckpointOwner {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2106,7 +2223,10 @@ module rustFix {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2158,7 +2278,10 @@ module rustFixOwner {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2210,7 +2333,10 @@ module rustFixTruncate {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2262,7 +2388,10 @@ module reachCleanupPublish {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2314,7 +2443,10 @@ module rustFixPinnedFloor {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2366,7 +2498,10 @@ module reachEarlyStampGc {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2418,7 +2553,10 @@ module reachEarlyStampGcAfterFailure {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2472,7 +2610,10 @@ module blockingMain {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2526,7 +2667,10 @@ module blockingNoB2Keep {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2579,7 +2723,10 @@ module blockingNoB2InBtree {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2632,7 +2779,10 @@ module blockingNoB2Tombstone {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2686,7 +2836,10 @@ module blockingNoB3CkptMax {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2741,7 +2894,10 @@ module blockingNoFallThroughMark {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2796,7 +2952,10 @@ module blockingNoFallThroughMarkPinned {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2850,7 +3009,10 @@ module blockingNoFallThroughCkptMax {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2904,7 +3066,10 @@ module blockingStampOrigin {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2957,7 +3122,10 @@ module blockingFailAfterPublish {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3012,7 +3180,10 @@ module blockingPagerPin {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3067,7 +3238,10 @@ module blockingPagerPinFixed {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3121,7 +3295,10 @@ module reachBlockingFallThrough {
     BlockingStopsAfterStamp = true,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3174,7 +3351,10 @@ module reachBlockingDropsSuperseded {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3227,7 +3407,10 @@ module reachBlockingDropsCurrent {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3280,7 +3463,10 @@ module reachBlockingStamp {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3333,7 +3519,10 @@ module reachBlockingFailsAfterPublish {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3387,7 +3576,10 @@ module blockingMainNoFallThrough {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3441,7 +3633,10 @@ module mbtBlocking {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3494,7 +3689,10 @@ module reachFixedGcDrops {
     FixB2WaitsForPinned = true,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3547,7 +3745,10 @@ module reachMainGcDrops {
     FixB2WaitsForPinned = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3600,7 +3801,10 @@ module reachPinGcDrops {
     FixB2WaitsForPinned = false,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3655,7 +3859,10 @@ module blockingFailTruncatesLog {
     FixB2WaitsForPinned = false,
     BlockingFailTruncatesLog = true,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3709,7 +3916,403 @@ module mbtBlockingPin {
     FixB2WaitsForPinned = true,
     BlockingFailTruncatesLog = false,
     Updates = false,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect no error: remove_tx is its own step and the finalized cache is pruned.
+// The filter only delays a prune, and no read goes wrong.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders GcKeepsVersionsAboveReaders NoStrandedVersions TxIdsResolve
+module finalizedMain {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NeverPrunesWithVersion to fail: a prune runs while the writer's version still exists.
+// A version names the TxID in the model, because it stores the timestamp.
+// Invariants: NeverPrunesWithVersion
+module reachFinalizedPrune {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect no error: prune every finalized TxID that is not in txs, with no referenced filter.
+// With the filter off, a prune drops more TxIDs, and no read goes wrong.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders GcKeepsVersionsAboveReaders NoStrandedVersions TxIdsResolve
+module finalizedNoReferenced {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = false,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect TxIdsResolve to fail: negative control. remove_tx runs before the rewrite and the prune has no filter.
+// A lost TxID makes a begin invisible, so a read misses a committed row.
+// Invariants: TxIdsResolve
+module finalizedRemoveBeforeRewriteNoReferenced {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = false,
+    RemoveTxBeforeRewrite = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect ReadsCorrect to fail: remove_tx before the rewrite. The filter reads a set that is out of date.
+// Prepare after the collect, finish, remove, then apply.
+// Invariants: ReadsCorrect
+module finalizedRemoveBeforeRewrite {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NeverPruneGuardFires to fail: a writer is Preparing at the collect and leaves txs before the apply.
+// Then the filter keeps its TxID for one more round. Reachability check for the filter.
+// Invariants: NeverPruneGuardFires
+module reachFinalizedGuardFires {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// The mbt configuration with the finalized TxID states, for the traces of
+// `make traces MBT=mbtFinalized`. The Makefile does not model check it.
+// Expect no error: every rule of the design is on, as in the code today.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders TxIdsResolve
+module mbtFinalized {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1", "k2"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 3,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = true,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3767,7 +4370,10 @@ module updates {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3820,7 +4426,10 @@ module reachUpdateCommits {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3873,7 +4482,10 @@ module reachUpdateConflict {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3926,7 +4538,10 @@ module reachConflictByEndOnly {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3979,7 +4594,10 @@ module reachConflictByCurrentOnly {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4032,7 +4650,10 @@ module reachConflictAfterGc {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4085,7 +4706,10 @@ module updatesNoGcWait {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4138,7 +4762,10 @@ module updatesNoRule2Lwm {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = false
+    GuardRule2Lwm = false,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4191,7 +4818,10 @@ module updatesNoRule2LwmNoGcWait {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = false
+    GuardRule2Lwm = false,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4244,7 +4874,10 @@ module updatesNoIdleRule3NoGcWait {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4298,7 +4931,10 @@ module updatesGcSampleNoRecheck {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4350,7 +4986,10 @@ module updatesGcSampleNoRecheckNoGcWait {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4403,7 +5042,10 @@ module blockingUpdates {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4457,7 +5099,10 @@ module blockingUpdatesNoRule2Lwm {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = false
+    GuardRule2Lwm = false,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4515,7 +5160,10 @@ module mbtUpdateCommits {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4568,7 +5216,10 @@ module mbtUpdateConflict {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4621,7 +5272,10 @@ module mbtUpdateConflictByEndOnly {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4674,7 +5328,10 @@ module mbtUpdateConflictByCurrentOnly {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -4727,7 +5384,10 @@ module mbtUpdateConflictAfterGc {
     BlockingStopsAfterStamp = false,
     BlockingFailTruncatesLog = false,
     Updates = true,
-    GuardRule2Lwm = true
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }
 
