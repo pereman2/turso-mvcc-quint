@@ -53,6 +53,8 @@ enum Failure {
     Backfill,
     /// The logical log is empty where the spec has records, or the other way.
     LogicalLog,
+    /// `finalized_tx_states` differs from the spec set of finalized TxIDs.
+    Finalized,
     /// A crash now recovers other rows than the spec.
     RecoveryRows,
     /// A crash now makes the database fail to open or to read.

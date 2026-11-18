@@ -46,6 +46,19 @@ pub(super) struct RowDriver {
     free_writers: Vec<(Arc<Connection>, Arc<StopAt>)>,
     /// Writers between WritePrepare and WriteFinish, by spec commit timestamp.
     writers: HashMap<i64, Writer>,
+    /// Writers that stopped before `remove_tx` (spec `fin.retiring`), by spec
+    /// commit timestamp.
+    retiring: HashMap<i64, Writer>,
+    /// Engine TxID of each spec commit timestamp.
+    tx_ids: BTreeMap<i64, u64>,
+    /// The TxIDs that `FinPruneCollect` saw in the version chains.
+    referenced: rustc_hash::FxHashSet<u64>,
+    /// A checkpoint ran `Finalize` since the last `FinPruneApply`. The engine
+    /// prunes there with its own set, and the spec does not model that prune.
+    finalize_ran: bool,
+    /// The trace models the finalized TxID states (ModelFinalizedPrune):
+    /// a WriteFinish put its writer in `fin.retiring`.
+    models_fin: bool,
     readers: HashMap<String, Reader>,
     /// Engine commit timestamp of each spec commit timestamp. Spec timestamp 0
     /// maps to the durable boundary after setup.
@@ -69,6 +82,9 @@ impl Driver for RowDriver {
             "WritePrepare" => self.write_prepare(step)?,
             "WriteLogAppend" => self.write_log_append(step)?,
             "WriteFinish" => self.write_finish(step)?,
+            "WriteRemoveTx" => self.write_remove_tx(step)?,
+            "FinPruneCollect" => self.fin_prune_collect(),
+            "FinPruneApply" => self.fin_prune_apply(),
             "ReaderPin" => self.reader_pin(step)?,
             "ReaderBegin" => self.reader_begin(step)?,
             "ReaderReadStart" => self.reader_read_start(step)?,
@@ -89,7 +105,10 @@ impl Driver for RowDriver {
                 .ck
                 .step_until(|state| state == CheckpointState::TruncateWal),
             "CheckpointTruncateDecide" => self.checkpoint_truncate_decide(step)?,
-            "CheckpointStamp" => self.ck.finish(),
+            "CheckpointStamp" => {
+                self.finalize_ran = true;
+                self.ck.finish()
+            }
             "Gc" => self.gc(step)?,
             other => return refuse(format!("no engine operation for {other}")),
         }
@@ -102,6 +121,10 @@ impl Driver for RowDriver {
             self.check_chains(step)?;
         }
         self.check(step)?;
+        self.check_finalized(step)?;
+        if step.action == "FinPruneApply" {
+            self.finalize_ran = false;
+        }
         if step.action.starts_with("Write") || step.action.starts_with("Checkpoint") {
             self.check_recovery(step)?;
         }
@@ -174,6 +197,11 @@ impl RowDriver {
             ck,
             free_writers: Vec::new(),
             writers: HashMap::new(),
+            retiring: HashMap::new(),
+            tx_ids: BTreeMap::new(),
+            referenced: Default::default(),
+            finalize_ran: false,
+            models_fin: false,
             readers: HashMap::new(),
             engine_ts: BTreeMap::new(),
             frames: Vec::new(),
@@ -232,6 +260,7 @@ impl RowDriver {
             other => panic!("a stopped COMMIT must be Preparing, got {other:?}"),
         };
         self.engine_ts.insert(ts, end_ts);
+        self.tx_ids.insert(ts, tx_id);
         self.writers.insert(
             ts,
             Writer {
@@ -268,6 +297,26 @@ impl RowDriver {
     pub(super) fn write_finish(&mut self, step: &Step) -> StepOutcome {
         let ts = step.pick("i").field("ts").int();
         let mut writer = self.writers.remove(&ts).unwrap();
+        // With ModelFinalizedPrune the spec splits the end of the commit:
+        // WriteFinish stops before remove_tx and WriteRemoveTx runs it.
+        // Every trace has `fin`, so key on `fin.retiring`.
+        let split = step
+            .vars
+            .get("fin")
+            .is_some_and(|fin| fin.field("retiring").items().iter().any(|t| t.int() == ts));
+        if split {
+            self.models_fin = true;
+            writer.stop.set(
+                CommitYieldPoint::BeforeFinishCommittedTx.point(),
+                Some(commit_yield_key(writer.tx_id)),
+            );
+            assert!(
+                step_statement(&mut writer.commit, &writer.stop, &self.io),
+                "COMMIT did not stop before remove_tx"
+            );
+            self.retiring.insert(ts, writer);
+            return Ok(());
+        }
         writer.stop.clear();
         assert!(
             !step_statement(&mut writer.commit, &writer.stop, &self.io),
@@ -276,6 +325,91 @@ impl RowDriver {
         drop(writer.commit);
         if !writer.reader_owned {
             self.free_writers.push((writer.conn, writer.stop));
+        }
+        Ok(())
+    }
+
+    /// `remove_tx`: the writer leaves `txs` and enters `finalized_tx_states`.
+    fn write_remove_tx(&mut self, step: &Step) -> StepOutcome {
+        let ts = step.pick("t").int();
+        let mut writer = self.retiring.remove(&ts).unwrap();
+        writer.stop.clear();
+        assert!(
+            !step_statement(&mut writer.commit, &writer.stop, &self.io),
+            "COMMIT must finish"
+        );
+        drop(writer.commit);
+        self.free_writers.push((writer.conn, writer.stop));
+        let tx_id = self.tx_ids[&ts];
+        if !self.mv.finalized_tx_states.contains_key(&tx_id) {
+            return fail(
+                Failure::Finalized,
+                format!("WriteRemoveTx: TxID {tx_id} of ts {ts} is not in finalized_tx_states"),
+            );
+        }
+        Ok(())
+    }
+
+    /// `collect_referenced_txids` over every chain, under read locks.
+    fn fin_prune_collect(&mut self) {
+        self.referenced.clear();
+        self.finalize_ran = false;
+        for entry in self.mv.rows.iter() {
+            let versions = entry.value().read();
+            Store::collect_referenced_txids(&versions, &mut self.referenced);
+        }
+        for outer in self.mv.index_rows.iter() {
+            for inner in outer.value().iter() {
+                let versions = inner.value().read();
+                Store::collect_referenced_txids(&versions, &mut self.referenced);
+            }
+        }
+    }
+
+    fn fin_prune_apply(&mut self) {
+        let referenced = std::mem::take(&mut self.referenced);
+        self.mv.prune_finalized_tx_states(&referenced);
+    }
+
+    /// The engine cache must be inside the spec set. It is not equal, because
+    /// the engine also prunes at each checkpoint Finalize and the spec does
+    /// not. After `FinPruneApply` the sets are equal, unless a checkpoint
+    /// finalized between the collect and the apply. Then the engine prune used
+    /// a newer set than the spec collect.
+    /// Traces without ModelFinalizedPrune skip the check: their spec cache
+    /// stays empty while the engine fills it at each remove_tx.
+    fn check_finalized(&self, step: &Step) -> StepOutcome {
+        if !self.models_fin {
+            return Ok(());
+        }
+        let Some(fin) = step.vars.get("fin") else {
+            return Ok(());
+        };
+        let spec: std::collections::BTreeSet<u64> = fin
+            .field("finalized")
+            .items()
+            .iter()
+            .map(|t| self.tx_ids[&t.int()])
+            .collect();
+        let engine: std::collections::BTreeSet<u64> = self
+            .mv
+            .finalized_tx_states
+            .iter()
+            .map(|entry| *entry.key())
+            .collect();
+        let ok = if step.action == "FinPruneApply" && !self.finalize_ran {
+            engine == spec
+        } else {
+            engine.is_subset(&spec)
+        };
+        if !ok {
+            return fail(
+                Failure::Finalized,
+                format!(
+                    "{}: spec finalized TxIDs {spec:?}, engine finalized_tx_states {engine:?}",
+                    step.action
+                ),
+            );
         }
         Ok(())
     }
