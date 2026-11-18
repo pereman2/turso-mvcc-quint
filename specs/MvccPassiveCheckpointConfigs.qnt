@@ -51,7 +51,9 @@ module main {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -104,7 +106,9 @@ module mbt {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -155,7 +159,9 @@ module abortsKeepMaterialized {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -206,7 +212,9 @@ module abortsNoDependency {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -257,7 +265,9 @@ module aborts {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -308,7 +318,9 @@ module dirtyClearFullScanEarly {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -359,7 +371,9 @@ module dirtyKeys {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -410,7 +424,9 @@ module dirtyMarkAfterCommit {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -461,7 +477,9 @@ module dirtyNoGenerationCas {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -511,7 +529,9 @@ module floorBackfill {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -561,7 +581,9 @@ module floorPinned {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -612,7 +634,9 @@ module floorRegistered {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -663,7 +687,9 @@ module gcSampleNoRecheck {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -714,7 +740,9 @@ module gcSample {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -764,7 +792,9 @@ module noBackfillStop {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -814,7 +844,9 @@ module noGcWait {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -864,7 +896,9 @@ module noSnapshotClamp {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -915,7 +949,9 @@ module rule3UnderLoadOneLook {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -966,7 +1002,9 @@ module rule3UnderLoad {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1018,7 +1056,9 @@ module ownCheckpoint {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1069,7 +1109,9 @@ module ownCheckpointBackfillFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1120,7 +1162,9 @@ module ownCheckpointKeepsMark {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1171,7 +1215,9 @@ module ownCheckpointKeepsMarkBackfillFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1222,7 +1268,9 @@ module ownCheckpointGc {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1273,7 +1321,9 @@ module ownCheckpointGcBackfillFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1324,7 +1374,9 @@ module ownCheckpointGcPinnedFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1375,7 +1427,9 @@ module reachStampedAboveReader {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1426,7 +1480,9 @@ module reachReaderMarkBelowFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1476,7 +1532,9 @@ module failedPublish {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1526,7 +1584,9 @@ module failedPublishFixed {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1576,7 +1636,9 @@ module reachFailedPublish {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1626,7 +1688,9 @@ module reachRepairedVersions {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1676,7 +1740,9 @@ module logTruncateRace {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1726,7 +1792,9 @@ module reachTruncateAppend {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1776,7 +1844,9 @@ module logTruncateAtomic {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1826,7 +1896,9 @@ module truncateFlagOn {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1876,7 +1948,9 @@ module truncateFlagOnFixed {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1926,7 +2000,9 @@ module reachTruncateRepair {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -1976,7 +2052,9 @@ module refuseCheckpointOwner {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2026,7 +2104,9 @@ module rustFix {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2076,7 +2156,9 @@ module rustFixOwner {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2126,7 +2208,9 @@ module rustFixTruncate {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2176,7 +2260,9 @@ module reachCleanupPublish {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2226,7 +2312,9 @@ module rustFixPinnedFloor {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2276,7 +2364,9 @@ module reachEarlyStampGc {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2326,7 +2416,9 @@ module reachEarlyStampGcAfterFailure {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2378,7 +2470,9 @@ module blockingMain {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2430,7 +2524,9 @@ module blockingNoB2Keep {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2481,7 +2577,9 @@ module blockingNoB2InBtree {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2532,7 +2630,9 @@ module blockingNoB2Tombstone {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2584,7 +2684,9 @@ module blockingNoB3CkptMax {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2637,7 +2739,9 @@ module blockingNoFallThroughMark {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2690,7 +2794,9 @@ module blockingNoFallThroughMarkPinned {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = true,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2742,7 +2848,9 @@ module blockingNoFallThroughCkptMax {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2794,7 +2902,9 @@ module blockingStampOrigin {
     BlockingStampOrigin = true,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2845,7 +2955,9 @@ module blockingFailAfterPublish {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2898,7 +3010,9 @@ module blockingPagerPin {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -2951,7 +3065,9 @@ module blockingPagerPinFixed {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = true,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3003,7 +3119,9 @@ module reachBlockingFallThrough {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = true,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3054,7 +3172,9 @@ module reachBlockingDropsSuperseded {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3105,7 +3225,9 @@ module reachBlockingDropsCurrent {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3156,7 +3278,9 @@ module reachBlockingStamp {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3207,7 +3331,9 @@ module reachBlockingFailsAfterPublish {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3259,7 +3385,9 @@ module blockingMainNoFallThrough {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3311,7 +3439,9 @@ module mbtBlocking {
     BlockingStampOrigin = false,
     FixB2WaitsForPinned = false,
     BlockingStopsAfterStamp = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3362,7 +3492,9 @@ module reachFixedGcDrops {
     BlockingStampOrigin = false,
     BlockingStopsAfterStamp = false,
     FixB2WaitsForPinned = true,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3413,7 +3545,9 @@ module reachMainGcDrops {
     BlockingStampOrigin = false,
     BlockingStopsAfterStamp = false,
     FixB2WaitsForPinned = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3464,7 +3598,9 @@ module reachPinGcDrops {
     BlockingStampOrigin = false,
     BlockingStopsAfterStamp = false,
     FixB2WaitsForPinned = false,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3517,7 +3653,9 @@ module blockingFailTruncatesLog {
     BlockingStampOrigin = false,
     BlockingStopsAfterStamp = false,
     FixB2WaitsForPinned = false,
-    BlockingFailTruncatesLog = true
+    BlockingFailTruncatesLog = true,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
 
@@ -3569,6 +3707,1027 @@ module mbtBlockingPin {
     BlockingStampOrigin = false,
     BlockingStopsAfterStamp = false,
     FixB2WaitsForPinned = true,
-    BlockingFailTruncatesLog = false
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true
   ).* from "./MvccPassiveCheckpoint"
 }
+
+// ---------------------------------------------------------------------------
+// Updates (gap 7): a registered reader writes one key and commits (ReaderUpdate).
+// Size S is one reader, MaxTs 4 and one checkpoint pass. The variants that must
+// fail at size S are the negative controls for the ones that must pass.
+
+// Updates: first committer wins under every GC rule. Two readers, one pass.
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BackfillBelowReaders BackfillFloorBelowReaders GcKeepsVersionsAboveReaders NoStrandedVersions NoLostUpdate
+module updates {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Reachability: an update can commit.
+// Expect NeverUpdateCommits to fail: the state is reachable.
+// Invariants: NeverUpdateCommits
+module reachUpdateCommits {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Reachability: an update can hit a write-write conflict.
+// Expect NeverUpdateConflict to fail: the state is reachable.
+// Invariants: NeverUpdateConflict
+module reachUpdateConflict {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Reachability: a conflict can come from an ended version alone (delete path).
+// Expect NeverConflictByEndOnly to fail: the state is reachable.
+// Invariants: NeverConflictByEndOnly
+module reachConflictByEndOnly {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Reachability: a conflict can come from a current version alone (insert path).
+// Expect NeverConflictByCurrentOnly to fail: the state is reachable.
+// Invariants: NeverConflictByCurrentOnly
+module reachConflictByCurrentOnly {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Reachability: a conflict can be found after GC trimmed the chain.
+// Expect NeverConflictAfterGc to fail: the state is reachable.
+// Invariants: NeverConflictAfterGc
+module reachConflictAfterGc {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Updates without the GC floor: the lwm alone should keep what an update needs.
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: NoLostUpdate
+module updatesNoGcWait {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = false,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Updates without the lwm term of Rule 2 (prediction: the floor is enough).
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: NoLostUpdate
+module updatesNoRule2Lwm {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NoLostUpdate to fail: GC drops a delete while the updater is open,
+// and the update commits over it (what-if: Rule 2 without lwm, no floor).
+// Invariants: NoLostUpdate
+module updatesNoRule2LwmNoGcWait {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = false,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NoLostUpdate to fail: Rule 3 drops the only current version while the
+// updater is open, and the UPSERT commits over a newer write (what-if).
+// Invariants: NoLostUpdate
+module updatesNoIdleRule3NoGcWait {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = false,
+    GuardDropCurrentOnlyWhenIdle = false,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Updates with two-step GC and no recheck of the lwm (prediction: the sampled
+// floor is below the new stamp).
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: NoLostUpdate
+module updatesGcSampleNoRecheck {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = true,
+    GuardGcRechecksIdleLwm = false,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect NoLostUpdate to fail: negative control for updatesGcSampleNoRecheck.
+// Invariants: NoLostUpdate
+module updatesGcSampleNoRecheckNoGcWait {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = true,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = false,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "keepsMark",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = true,
+    GuardGcRechecksIdleLwm = false,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Mode B with updates.
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: TypeOK ReadsCorrect RecoveryCorrect BlockingStoreEmpty BackfillBelowReaders NoLostUpdate
+module blockingUpdates {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = false,
+    Mode = "blocking",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Mode B with updates, without the lwm term of Rule 2 (prediction: the keep clause
+// holds the tombstone and the current version shows the update).
+// Expect no error: no update commits over a write that began after its snapshot.
+// Invariants: NoLostUpdate
+module blockingUpdatesNoRule2Lwm {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1"),
+    MaxTs = 4,
+    FixRefuseCheckpointOwner = false,
+    Mode = "blocking",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = false,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// ---------------------------------------------------------------------------
+// Witness traces for the trace replay of ReaderUpdate (gap 7). Each module is `mbt`
+// with Updates = true, one key and a witness that must fail. `make bug-traces`
+// writes the trace. The Makefile does not model check these modules.
+
+// Witness: an update commits.
+// Expect NeverUpdateCommits to fail: the state is reachable.
+// Invariants: NeverUpdateCommits
+module mbtUpdateCommits {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Witness: an update hits a write-write conflict.
+// Expect NeverUpdateConflict to fail: the state is reachable.
+// Invariants: NeverUpdateConflict
+module mbtUpdateConflict {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Witness: a conflict comes from an ended version alone.
+// Expect NeverConflictByEndOnly to fail: the state is reachable.
+// Invariants: NeverConflictByEndOnly
+module mbtUpdateConflictByEndOnly {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Witness: a conflict comes from a current version alone.
+// Expect NeverConflictByCurrentOnly to fail: the state is reachable.
+// Invariants: NeverConflictByCurrentOnly
+module mbtUpdateConflictByCurrentOnly {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Witness: a conflict is found after GC trimmed the chain.
+// Expect NeverConflictAfterGc to fail: the state is reachable.
+// Invariants: NeverConflictAfterGc
+module mbtUpdateConflictAfterGc {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1"),
+    Readers = Set("r1", "r2"),
+    MaxTs = 8,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 2,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = false,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 0,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = true,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = true,
+    WritersPinMarks = true,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = true,
+    GuardRule2Lwm = true
+  ).* from "./MvccPassiveCheckpoint"
+}
+

@@ -47,8 +47,9 @@
  *
  * Not modeled: schema changes and root-page bindings, indexes, sequences,
  * the WAL restart in passive mode, aborts of Active writers and aborts after
- * the log append, write-write conflicts between writers, page-level I/O, and
- * a crash inside a mode B pass.
+ * the log append, write-write conflicts between writers (except a reader that
+ * updates one key, see Updates), page-level I/O, and a crash inside a mode B
+ * pass.
  *
  * Notes on the Quint code:
  *   - Keys and Readers are strings. The model checker sees every order of
@@ -82,6 +83,7 @@ module MvccPassiveCheckpoint {
                                            // can read its effect from the B-tree
   const GuardDropCurrentOnlyWhenIdle: bool // GC Rule 3 needs "no open snapshot"
   const GuardBackfillStopsAtReaders: bool  // WAL backfill stops at the lowest read mark
+  const GuardRule2Lwm: bool                // GC Rule 2 (both forms) needs v.e < lwm (engine: e <= lwm, mod.rs:8606; equal because timestamps are unique)
 
   // Which reader marks bound the GC floor. One of:
   //   "code"       registered readers' marks and backfillFloor (what
@@ -107,6 +109,10 @@ module MvccPassiveCheckpoint {
   const GuardReadersAbortOnDependency: bool // register_commit_dependency + abort_now
   const AbortKeepsMaterialized: bool        // false: set_end(None) resets
                                             // materialized_at (the code). true: keep it.
+
+  // Updates. false in the main configuration.
+  const Updates: bool                       // a registered reader can write one key
+                                            // (ReaderUpdate, first committer wins)
 
   // Dirty keys. false / 0 in the main configuration.
   const DirtyKeys: bool                      // collect only keys in the dirty map
@@ -181,6 +187,7 @@ module MvccPassiveCheckpoint {
                   want: int, deps: Set[int] }
   type LateMark = { k: str, ts: int }
   type GcState = { pc: str, lwm: int, floor: int }
+  type Rmw = { k: str, b: int, ts: int }
 
   var clock: int                 // Last timestamp taken from the logical clock.
   var chain: str -> Set[Version] // chain[k]: set of versions of key k in the version store.
@@ -208,6 +215,7 @@ module MvccPassiveCheckpoint {
   var fullMin: int               // checkpoint_full_scan_min_snapshot_ts.
   var markFails: int             // Number of failed re-marks so far.
   var gcs: GcState               // Sampled GC values when GC runs in two steps.
+  var rmw: Set[Rmw]              // History: updates that passed validation, with begin and commit ts.
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -299,16 +307,19 @@ module MvccPassiveCheckpoint {
     fullMin' = 0,
     markFails' = 0,
     gcs' = { pc: "idle", lwm: 0, floor: 0 },
+    rmw' = Set(),
   }
 
   // Keeps the row variables as they are.
   action UnchangedRowVars = all {
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
     fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
+    rmw' = rmw,
   }
 
   action UnchangedFullScan = all {
     fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails,
+    rmw' = rmw,
   }
 
   // ---------------------------------------------------------------------------
@@ -408,6 +419,7 @@ module MvccPassiveCheckpoint {
     fullMin' = Max(Set(fullMin, s)),
     fullGen' = fullGen + 1,
     markFails' = markFails + 1,
+    rmw' = rmw,
   }
 
   // unmark then mark again with the stamp that was there. The second mark
@@ -576,6 +588,76 @@ module MvccPassiveCheckpoint {
     rd' = rd.setBy(r, x => { ...x, pc: "idle", pinned: false }),
     UnchangedForReaders, err' = err,
     UnchangedRowVars,
+  }
+
+  // ReaderUpdate: a registered reader writes one key (an UPSERT) and commits.
+  // It merges the statement check, Preparing, the commit check and the chain
+  // edit into one step. This is safe for the question "can GC hide a
+  // write-write conflict": once a writer W has written k, the chain holds W's
+  // TxID, GC never drops it and another writer sees a conflict at its commit check (an Active insert is invisible to a second inserter). So
+  // the window that matters is from W's begin to W's first write of k, and
+  // ReaderBegin, Gc and ReaderUpdate are separate steps, so the model keeps it.
+  // ts = clock + 1 does not mirror WritePrepare under WriterBeginTicks; no configuration sets both.
+  // Model gap: after the step the updater leaves Registered. In the engine W
+  // stays in txs as Preparing, and its begin still counts in the lwm. So the
+  // model GC can drop more than the engine. This is safe: W needs no version
+  // after its check, and every other reader has its own begin in Lwm.
+  // Conflict evidence for begin b (check_version_conflicts,
+  // is_write_write_conflict).
+  pure def EndEvidence(c: Set[Version], b: int, inf: Set[int]): bool =
+    c.exists(v => v.e != Inf and (inf.contains(v.e) or v.e > b))
+  pure def CurrentEvidence(c: Set[Version], b: int, inf: Set[int]): bool =
+    c.exists(v => v.e == Inf and v.b != 0 and (inf.contains(v.b) or v.b > b))
+  def WwConflict(k: str, b: int): bool =
+    EndEvidence(chain.get(k), b, InflightTs) or CurrentEvidence(chain.get(k), b, InflightTs)
+  // A write of k has no version left in the chain: GC trimmed the chain.
+  def ChainTrimmed(k: str): bool =
+    writes.exists(w => w.k == k and not(chain.get(k).exists(v => v.b == w.ts or v.e == w.ts)))
+
+  action ReaderUpdate(r: str, k: str): bool = {
+    val b = rd.get(r).b
+    val ts = clock + 1
+    val old = Oracle(k, ts)
+    val cur = chain.get(k).filter(x => x.e == Inf and x.b != 0)
+    val ended =
+      if (cur != Set()) cur.map(x => { ...x, e: ts, mat: 0 })
+      else if (old != 0) Set({ b: 0, e: ts, value: old, mat: 0 })
+      else Set()
+    val added = Set({ b: ts, e: Inf, value: ts, mat: 0 })
+    all {
+      Updates,
+      ck.owner != r or ck.pc == "idle",
+      rd.get(r).pc == "active",
+      ts <= MaxTs,
+      // Left out: a Preparing write of k with ts < b. For an insert or update the engine reads that version speculatively and registers a commit dependency, with no conflict (core/mvcc/database/mod.rs:11234-11248, 10884). Safe because writes of k are serialized, so no write of k lies in (b, clock]. A Preparing delete below b is a lead, not verified: the commit check gives a conflict with no cause (mod.rs:11324-11331, 2232-2245, 2299-2308). A write with ts > b stays a conflict: the statement sees no version, and the commit check raises WriteWriteConflict (about mod.rs:2280-2290), so the driver accepts that conflict from the COMMIT.
+      not(inflight.exists(i => i.k == k and i.ts < b)),
+      rd' = rd.setBy(r, x => { ...x, pc: "idle", pinned: false }),
+      if (WwConflict(k, b)) all {
+        // WriteWriteConflict: roll back, nothing written.
+        ck' = { ...ck, seen: ck.seen.union(Set("wwConflict"))
+          .union(if (not(EndEvidence(chain.get(k), b, InflightTs))) Set("wwCurrentOnly") else Set())
+          .union(if (not(CurrentEvidence(chain.get(k), b, InflightTs))) Set("wwEndOnly") else Set())
+          .union(if (ChainTrimmed(k)) Set("wwAfterGc") else Set()) },
+        clock' = clock, chain' = chain, inflight' = inflight, writes' = writes, rmw' = rmw,
+      } else all {
+        not(inflight.exists(i => i.k == k)),
+        // copy of the WritePrepare body with isDelete = false and this ts
+        clock' = ts,
+        chain' = chain.set(k, chain.get(k).exclude(cur).union(ended).union(added)),
+        inflight' = inflight.union(Set({ ts: ts, k: k, v: ts, logged: false,
+                                         marked: not(DirtyKeys and GuardMarkBeforeCommitEnd),
+                                         omat: if (AbortKeepsMaterialized and cur != Set()) AnyVersion(cur).mat else 0,
+                                         mark: if (WritersPinMarks) rd.get(r).mark else 0 })),
+        writes' = writes.union(Set({ ts: ts, k: k, v: ts })),
+        rmw' = rmw.union(Set({ k: k, b: b, ts: ts })),
+        ck' = ck,
+      },
+      lastCommitted' = lastCommitted, llog' = llog, wal' = wal, nBackfill' = nBackfill,
+      db' = db, dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor,
+      nCk' = nCk, logged' = logged, err' = err,
+      aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
+      fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -842,7 +924,7 @@ module MvccPassiveCheckpoint {
     dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
     UnchangedForCheckpoint,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
-    fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
+    fullMin' = fullMin, markFails' = markFails, gcs' = gcs, rmw' = rmw,
   }
 
   action CheckpointFail(at: str): bool = {
@@ -1026,7 +1108,7 @@ module MvccPassiveCheckpoint {
 
   // Rule 2: a superseded version that no snapshot sees.
   def Rule2(v: Version, lwm: int, floor: int): bool = and {
-    v.e != Inf, Resolved(v.e), v.e < lwm,
+    v.e != Inf, Resolved(v.e), not(GuardRule2Lwm) or v.e < lwm,
     not(GuardGcWaitsForReaders) or (v.mat != 0 and v.mat <= floor),
   }
 
@@ -1074,7 +1156,7 @@ module MvccPassiveCheckpoint {
   }
 
   def Rule2B(v: Version, c: Set[Version], lwm: int, ckptMax: int, floor: int): bool = and {
-    v.e != Inf, Resolved(v.e), v.e < lwm,
+    v.e != Inf, Resolved(v.e), not(GuardRule2Lwm) or v.e < lwm,
     not(KeepClauseB(v, ckptMax, HasCurrentB(c))),
     not(FixB2WaitsForPinned) or Pinned.forall(r => rd.get(r).mark >= wal.length()),
   }
@@ -1199,6 +1281,8 @@ module MvccPassiveCheckpoint {
         ReaderReadStart(r, k),
         ReaderReadEnd(r),
         ReaderEnd(r),
+        nondet k = Keys.oneOf()
+        ReaderUpdate(r, k),
       },
     },
     nondet at = Set("collect", "writing", "committed", "publishing", "published", "backfilled", "truncateDecided", "truncated", "prune", "clear").oneOf()
@@ -1282,7 +1366,13 @@ module MvccPassiveCheckpoint {
     Keys.forall(k => Pinned.union(Registered).forall(r =>
       chain.get(k).exclude(GcChain(k, Lwm, GcFloor)).forall(v => v.mat <= rd.get(r).mark)))
 
+  // First committer wins: no write of k between an update's begin and its commit.
+  val NoLostUpdate: bool =
+    rmw.filter(u => writes.exists(w => w.ts == u.ts)).forall(u =>
+      not(writes.exists(w => w.k == u.k and u.b < w.ts and w.ts < u.ts)))
+
   val TypeOK: bool = and {
+    rmw.forall(u => u.b < u.ts and u.ts <= MaxTs),
     Set("committed", "publishing").contains(ck.pc) implies ck.frame > 0,
     ck.pagerOwned == (ck.pc == "writing"),
     clock.in(0.to(MaxTs)),
@@ -1303,7 +1393,15 @@ module MvccPassiveCheckpoint {
   val Safety: bool = and {
     TypeOK, ReadsCorrect, RecoveryCorrect, BackfillBelowReaders,
     BackfillFloorBelowReaders, GcKeepsVersionsAboveReaders, NoStrandedVersions,
+    NoLostUpdate,
   }
+
+  // Updates.
+  val NeverUpdateCommits: bool = rmw == Set()
+  val NeverUpdateConflict: bool = not(ck.seen.contains("wwConflict"))
+  val NeverConflictByEndOnly: bool = not(ck.seen.contains("wwEndOnly"))
+  val NeverConflictByCurrentOnly: bool = not(ck.seen.contains("wwCurrentOnly"))
+  val NeverConflictAfterGc: bool = not(ck.seen.contains("wwAfterGc"))
 
   val NeverCleanupPublishes: bool = not(ck.seen.contains("cleanupPublished"))
   val NeverGcEarlyStampAfterFailure: bool = not(ck.seen.contains("earlyStampGcAfterFailure"))
