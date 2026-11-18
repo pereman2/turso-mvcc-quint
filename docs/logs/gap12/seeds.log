@@ -1,0 +1,38 @@
+      24
+issue8004Sync-s1.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s1.itf.json: failed
+issue8004Sync-s2.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s2.itf.json: failed
+issue8004Sync-s3.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s3.itf.json: failed
+issue8004Sync-s4.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s4.itf.json: failed
+issue8004Sync-s5.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s5.itf.json: failed
+issue8004Sync-s6.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s6.itf.json: failed
+issue8004Sync-s7.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s7.itf.json: failed
+issue8004Sync-s8.itf.json: the engine differs from the spec at step 21 (CheckpointPublish): CookieBehind: header cookie 6, shared schema version 7
+issue8004Sync-s8.itf.json: failed
+reachMapsPageId-s1.itf.json: conforms
+reachMapsPageId-s2.itf.json: conforms
+reachMapsPageId-s3.itf.json: the engine differs from the spec at step 19 (CheckpointCommit): RecoveryRows: recovered {"t1": None, "t2": None}, spec logged {"t1": Some(3), "t2": None}
+reachMapsPageId-s3.itf.json: failed
+reachMapsPageId-s4.itf.json: conforms
+reachMapsPageId-s5.itf.json: the engine differs from the spec at step 19 (CheckpointCommit): RecoveryRows: recovered {"t1": None, "t2": None}, spec logged {"t1": Some(3), "t2": None}
+reachMapsPageId-s5.itf.json: failed
+reachMapsPageId-s6.itf.json: conforms
+reachMapsPageId-s7.itf.json: the engine differs from the spec at step 19 (CheckpointCommit): RecoveryRows: recovered {"t1": None, "t2": None}, spec logged {"t1": Some(3), "t2": None}
+reachMapsPageId-s7.itf.json: failed
+reachMapsPageId-s8.itf.json: conforms
+reachStableIdChanges-s1.itf.json: conforms
+reachStableIdChanges-s2.itf.json: conforms
+reachStableIdChanges-s3.itf.json: conforms
+reachStableIdChanges-s4.itf.json: conforms
+reachStableIdChanges-s5.itf.json: conforms
+reachStableIdChanges-s6.itf.json: the engine differs from the spec at step 13 (CheckpointCommit): RecoveryRows: recovered {"t1": Some(4), "t2": None}, spec logged {"t1": Some(4), "t2": Some(2)}
+reachStableIdChanges-s6.itf.json: failed
+reachStableIdChanges-s7.itf.json: conforms
+reachStableIdChanges-s8.itf.json: conforms
+SEEDS-DONE

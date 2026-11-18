@@ -1,0 +1,4 @@
+== main
+ok   MvccPassiveSchema-main: no error (21177855 states, 463s)
+== catalog
+ok   MvccPassiveSchema-catalog: no error (35436959 states, 780s)

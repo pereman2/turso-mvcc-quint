@@ -256,6 +256,7 @@ variants use `MaxTs = 4`, except `indexes`.
 | `FixDisjointIds` | The same fix as for #11501: no temporary id can name the page of an index. | #7960 | `issue7960` | `KindsMatch` (a row lands in a B-tree of another kind) |
 | `FixAlterPatch` | The publish patches every version of the `sqlite_schema` row that still carries the temporary id, and only a `DROP` puts the root in `dropped_root_pages`. | #8077 | `issue8077`, `issue8077Row` | `NoLiveDestroy`, `SchemaRowCurrent` |
 | `FixAlterRecovery` | Recovery maps a replayed `sqlite_schema` update whose `rootpage` is a temporary id to the table that bootstrap knows by that id. It needs `FixPersistIds`. | #11751 | `noAlterRecovery` | `RecoveryCorrect` (recovery panics) |
+| `FixPermanentLogId` | A row record keeps the permanent id, and core writes that id into the object map. It needs `FixPersistIds`. | Gap 12 | `permanentIdOnly` | `StableIdsDistinct`, when `FixDisjointIds` is off |
 
 The id fixes and `FixAlterRecovery` are design statements, not patches.
 Each one closes its issue in the model. Other fixes can close them too, for example a log record
@@ -673,6 +674,132 @@ sampled floor and a begin above the one insert of the row, so the B-tree gives
 it the row. The row spec fails there because its rows have updates and a dual
 cursor that looks twice. This does not show that the recheck is unneeded. The
 row has one insert only.
+
+## Sync object map
+
+The feature constant `SyncObjectMap` adds the object map of a row commit and
+the stable table id. Off, the new variable `omap` stays `""` and every old
+module has its old state space. `SYNC.md` says what sync expects.
+
+Sync reads two things. Push decodes each row record of a commit frame and
+finds the table name through the object map of the same frame. A record whose
+id is not in the map is skipped, so a wrong entry sends the row to another
+table. Pull builds a client map from `abs(rootpage)`. Two promises follow.
+
+- `ObjectMapCorrect`: the object map of the commit of a row names the table
+  that the row was written to. A commit that fails because the map has no
+  name breaks it too.
+- `StableIdsDistinct`: no two live tables have the same `abs(rootpage)`, so
+  the client map has one name for each stable id.
+
+`WriteRow` builds the map of its commit with the lookup of the code. The
+order is as follows.
+
+1. `canonical_log_id` gives the record id: `-root` if the binding has a page,
+   else the temporary id (`core/mvcc/database/mod.rs:2458-2470`).
+2. `rootpage_for_table_id` reads the id as a rootpage first. If a schema has
+   a table with `rootpage == x` or `-x`, it keeps `x`. Else it takes the page
+   of the binding of id `x` (`mod.rs:2919-2932`). The binding map is keyed by
+   the temporary id. So for `x = -page` this finds nothing when temporary ids
+   and pages are disjoint, and before a restart. With `FixDisjointIds` off, a
+   temporary id can equal `-page` (the code comment at `mod.rs:2920-2930`
+   warns about it). After a restart, bootstrap keys bindings by
+   `-(root_page)`.
+3. `table_name_for_rootpage_in_schema` tries `rootpage == r`, then
+   `rootpage == -r`, on the connection schema and then the shared schema
+   (`mod.rs:662-689`). It reads the index `table_names_by_root_page`
+   (`core/schema.rs:3135`).
+4. `table_name_for_rootpage_in_mvcc_schema` scans the `sqlite_schema`
+   versions with no end (`mod.rs:692-718`). After catalog GC drops the chain
+   of a row, the scan does not find it.
+5. No name: the commit fails with `Corrupt` (`mod.rs:2999`). The spec marks
+   this with `"-"`.
+
+The model has one schema for the connection and the shared schema, `pub`.
+For the paths of the two reproducers, the engine matches that. A connection
+that adopts the shared schema resolves negative roots in its copy
+(`Connection::maybe_update_schema`, `core/connection.rs:2198-2231`, and
+`resolve_schema_negative_roots`, `mod.rs:9429`). By code reading, that changes
+`root_page` of each table, but not the index `table_names_by_root_page` that
+step 3 reads. Only the publish moves the index
+(`checkpoint_state_machine.rs:2106-2109`). Step 4 reads the `sqlite_schema`
+versions, which catalog GC drops. So the sync configurations turn
+`CatalogReads` on.
+
+`WriteRow` adds three outcomes to `seen`. `MapInPass`: the row commits with
+its temporary id while a pass that creates its B-tree is open.
+`MapFromCatalog`: no schema knows the record id, and step 4 gives the name.
+`MapFromBinding`: the binding branch of step 2 gives the name. The binding
+branch needs a table `y` with `tid[y] == x` and a page. A record carries
+`tid[o]` only while `o` has no page, and with `FixDisjointIds` a record id
+`-page` is never a temporary id. So with `FixDisjointIds` the branch cannot
+fire, and `sync` and `syncPermanentId` check `NeverMapsFromBinding`. With
+`FixDisjointIds` off, it is not checked.
+
+### Results
+
+All sync modules have `CatalogReads = true` and `Readers = Set()`. No reader
+step reads or changes a table id, a binding page or the map. The counts of
+the modules with no error come from `docs/logs/gap12/r3-sync-tlc.log`.
+A failing module stops at its first counterexample, and that count varies
+with the TLC workers, so the table gives only the result.
+
+| Module | Change from `main` | Result |
+|---|---|---|
+| `sync` | none | No error (256,855 states) |
+| `syncPermanentId` | `FixPermanentLogId` | No error (253,467 states) |
+| `issue11501Sync` | `FixDisjointIds` off | `ObjectMapCorrect` fails |
+| `issue11501StableId` | `FixDisjointIds` off | `StableIdsDistinct` fails |
+| `permanentIdOnly` | `FixDisjointIds` off, `FixPermanentLogId` | `StableIdsDistinct` fails |
+| `issue8004Sync` | `FixDdlRebases` off, one checkpoint pass | `ObjectMapCorrect` fails |
+| `reachMapsPageId` | none | `NeverMapsPageId` fails |
+| `reachMapsInPass` | none | `NeverMapsInPass` fails |
+| `reachStableIdChanges` | none | `NeverStableIdChanges` fails |
+| `reachMapsFromCatalog` | `FixDdlRebases` off | `NeverMapsFromCatalog` fails |
+
+`issue11501Sync` shows that #11501 also breaks the push (`FINDINGS.md` row
+26). `issue8004Sync` shows that #8004 breaks it in a second way
+(`FINDINGS.md` row 27). A DDL commit that copied the schema before a publish
+installs its old copy, so the shared schema keeps the temporary root of a
+table that has a page. Catalog GC at the end of the pass then drops the
+`sqlite_schema` versions of that table. The next row of the table writes
+`-page`, no lookup finds a name, and the commit fails with `Corrupt`. Every
+connection fails, also a new one, until the next publish patches the shared
+schema again. `FixDdlRebases` closes this path in the model.
+`reachMapsFromCatalog` shows that step 4 gives a name with the DDL commit of
+the code (`FixDdlRebases` off). Whether step 4 fires with `FixDdlRebases` on is
+not checked.
+
+`permanentIdOnly` shows that a permanent id alone does not keep the client
+map apart: the `rootpage` column holds `-id` before the first checkpoint, and
+the id range must also be disjoint from page numbers. `syncPermanentId` has
+`FixDdlRebases` on. With a permanent id, core writes the id of the table that
+wrote the row, so the map needs no lookup, and the `issue8004Sync` path goes
+away too. No module checks a permanent id with `FixDdlRebases` off.
+`reachStableIdChanges` answers the second open
+question of `SYNC.md`: the stable id changes at the first checkpoint.
+
+The trace replay runs `reachMapsPageId`, `reachStableIdChanges`,
+`reachMapsInPass` and `issue8004Sync` on the engine (HARNESS "Sync traces").
+After each step of these traces, it also reads the live
+`sqlite_schema.rootpage` and checks the form of `RootCol` and
+`StableIdsDistinct`.
+
+Left out:
+
+- the connection schema as a separate copy
+- a restart: bootstrap keys bindings by `-(root_page)`, and the store has no
+  `sqlite_schema` versions, so the map after a restart is not modeled
+- more than one row of a table: each table gets one row commit, so
+  `ObjectMapCorrect` covers the first row of each table
+- a row commit while another connection has an open DDL. `WriteRow` needs
+  `ddl.pc == "none"`. Whether the engine refuses or allows such a commit
+  is not tested. A `BEGIN CONCURRENT` write that commits during an
+  open DDL could match the uncommitted `CREATE` through step 4. Not modeled.
+- rows and schema rows in one commit, ALTER, indexes, the server and the
+  pull protocol
+- a publish between `canonical_log_id` and the map build. That needs a commit
+  on another thread, or a write set over 1024 entries (`mod.rs:2700-2703`).
 
 ## Not modeled
 

@@ -255,6 +255,58 @@ MBT_TRACES=$PWD/specs/traces/bugs harness/run-in-turso.sh -- \
   mbt_tests::schema::schema_traces_from_folder -- --ignored --nocapture
 ```
 
+## Sync traces
+
+The sync tests need the cargo feature `conn_raw_api`, because the engine
+builds the object map only with it. Run them with
+`harness/run-in-turso.sh -- --features conn_raw_api mbt_tests::schema`.
+
+| Test | Trace | Expect | What the engine does |
+|---|---|---|---|
+| `sync_traces_conform` | `reachMapsPageId` | Conforms | A row record carries `-page`, and the object map names its table |
+| `sync_traces_conform` | `reachStableIdChanges` | Conforms | A row record carried the temporary id, and the `rootpage` column now holds the page. The rootpage check runs at step 24 (`CheckpointPublish`) |
+| `map_in_pass_trace_conforms_until_issue_11502` | `reachMapsInPass` | `RecoveryRows` at step 19 | A row commits with its temporary id while a pass that creates its B-tree is open. The object map names the table. After a crash, recovery loses the row (#11502) |
+| `issue_8004_sync_trace_fails_insert` | `issue8004Sync` | `ObjectMap` at step 18 | The `INSERT` fails with `Corrupt`, and the spec has `omap = "-"` at that step |
+
+`write_row` turns on portable changes on the writer connection when the
+spec records an object map. Two checks follow.
+
+- The engine agrees with the spec (`Failure::ObjectMapSpec`). A successful
+  `INSERT` needs `omap[table] == table` in the spec. An `INSERT` that fails
+  with "cannot resolve user data table id" needs `omap[table] == "-"`. Any
+  other error panics, as before. After a successful `INSERT`,
+  `portable.rs` reads the newest commit frame twice: its row records
+  (`StreamingLogicalLogReader::next_frame`) and its object map
+  (`next_portable_changes`). The two commit timestamps must be equal, and
+  the frame must have one table row record. Its table id must have the form
+  of the spec record: the engine temporary id of the table, or `-page` of its
+  engine binding.
+- The promise holds (`Failure::ObjectMap`). The `INSERT` succeeds, the object
+  map resolves that exact record id to the table, and no entry names another
+  table. This is `ObjectMapCorrect`, as the recovery check is
+  `RecoveryCorrect`.
+
+After every step of a trace with `omap`, `check_root_columns` reads
+`SELECT name, rootpage FROM sqlite_schema WHERE type = 'table'` on a probe
+connection (`Failure::RootPage`). Each table that is live in the spec has a
+row, and no other spec table does. Its `rootpage` has the form of `RootCol`:
+the engine temporary id of the table, or the engine page of its binding. All
+live tables, also the internal ones, have distinct `abs(rootpage)`. The check
+skips a state with a `Preparing` DDL. `sync_traces_conform` prints the steps
+that it checked and asserts that step 24 of `reachStableIdChanges` is one of
+them (`docs/logs/gap12/r3-replay.log`).
+
+The sync modules turn `CatalogReads` on, so `check_catalog_chains` compares
+the catalog GC of the engine with the spec after every step, as for the
+catalog traces. The trace `reachMapsInPass` also hits #11502, because a row
+that commits during the first pass of its table is the #11502 shape. Some
+other seeds of the reach modules hit #11502 too: 3 of 8 seeds of
+`reachMapsPageId` and 1 of 8 of `reachStableIdChanges`, in a replay before
+the rootpage check (`docs/logs/gap12/seeds.log`). The kept traces are
+seed 1. An `issue11501Sync` trace cannot replay, because the driver pads ids
+so that the engine never makes the collision. The Rust test in
+`harness/repro/sync-object-map-11501.patch` covers that path.
+
 ## Bug traces
 
 | Variant | Trace | Engine result |

@@ -1,0 +1,22 @@
+== typecheck
+typecheck rc=0
+== sync
+ok   MvccPassiveSchema-sync: no error (256855 states, 48s)
+== syncPermanentId
+ok   MvccPassiveSchema-syncPermanentId: no error (253467 states, 47s)
+== issue11501Sync
+ok   MvccPassiveSchema-issue11501Sync: ObjectMapCorrect fails as expected (3435 states, 41s)
+== issue11501StableId
+ok   MvccPassiveSchema-issue11501StableId: StableIdsDistinct fails as expected (2150 states, 41s)
+== permanentIdOnly
+ok   MvccPassiveSchema-permanentIdOnly: StableIdsDistinct fails as expected (2283 states, 42s)
+== issue8004Sync
+ok   MvccPassiveSchema-issue8004Sync: ObjectMapCorrect fails as expected (11698 states, 45s)
+== reachMapsPageId
+ok   MvccPassiveSchema-reachMapsPageId: NeverMapsPageId fails as expected (1111 states, 43s)
+== reachMapsInPass
+ok   MvccPassiveSchema-reachMapsInPass: NeverMapsInPass fails as expected (126 states, 46s)
+== reachStableIdChanges
+ok   MvccPassiveSchema-reachStableIdChanges: NeverStableIdChanges fails as expected (850 states, 46s)
+== reachMapsFromCatalog
+ok   MvccPassiveSchema-reachMapsFromCatalog: NeverMapsFromCatalog fails as expected (2979 states, 43s)

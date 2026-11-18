@@ -1,0 +1,13 @@
+repo  Wed Nov 18 00:32:44 CET 2026
+ok   MvccPassiveSchema-sync: no error (256855 states, 13s)
+ok   MvccPassiveSchema-syncPermanentId: no error (253467 states, 11s)
+ok   MvccPassiveSchema-issue11501Sync: ObjectMapCorrect fails as expected (3724 states, 7s)
+ok   MvccPassiveSchema-issue11501StableId: StableIdsDistinct fails as expected (1926 states, 7s)
+ok   MvccPassiveSchema-permanentIdOnly: StableIdsDistinct fails as expected (2205 states, 6s)
+ok   MvccPassiveSchema-reachMapsPageId: NeverMapsPageId fails as expected (1259 states, 7s)
+ok   MvccPassiveSchema-reachMapsInPass: NeverMapsInPass fails as expected (187 states, 6s)
+ok   MvccPassiveSchema-reachStableIdChanges: NeverStableIdChanges fails as expected (817 states, 7s)
+ok   MvccPassiveSchema-issue8004Sync: ObjectMapCorrect fails as expected (11520 states, 7s)
+ok   MvccPassiveSchema-reachMapsFromCatalog: NeverMapsFromCatalog fails as expected (3458 states, 6s)
+ok   MvccPassiveSchema-main: no error (21177855 states, 429s)
+R4-DONE

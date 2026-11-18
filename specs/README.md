@@ -47,9 +47,10 @@ There are six specs in this folder.
   (the flag off), with 563,686 states (`DESIGN-rows.md`, section "Mode B").
 - Schema (`MvccPassiveSchema.qnt`): table ids, root bindings,
   `sqlite_schema`, the schema cookie, page allocation, DDL, publish and
-  recovery. The main configuration has 2 tables, pages 2 and 3, 1 reader, 4
+  recovery. With `SyncObjectMap` it also has the object map of each row
+  commit and the stable table id. The main configuration has 2 tables, pages 2 and 3, 1 reader, 4
   timestamps and 2 checkpoints. It has no index and no ALTER. TLC explores
-  15,985,399 states in 17 minutes.
+  21,177,855 states (`docs/logs/gap12/r3-main-catalog.log`).
 - Sequences (`MvccPassiveSequence.qnt`): sequence rows, `nextval`,
   compaction and publish. The main configuration has values 1 to 3, 2
   connections, a clock bound of 8 and 2 passes. The sequence is ascending,

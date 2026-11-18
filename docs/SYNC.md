@@ -1,6 +1,6 @@
 # How sync depends on table ids
 
-The specs in `specs/` do not model sync. Sync reads the logical log and
+The schema spec models the object map of each commit and the stable table id (`DESIGN-schema.md`, "Sync object map"). It does not model the pull protocol or the server. Sync reads the logical log and
 the `rootpage` column of `sqlite_schema`. It uses the same rule as recovery:
 the id of a table is `-rootpage`. So any change to table ids, for example
 step 3 of `SIMPLIFY.md`, must keep sync working. This file records what sync
@@ -27,6 +27,17 @@ Sync uses it to turn log records into row changes with a table name.
 The record id and the object map id must use the same form, or the lookup
 fails. Today both are `-rootpage`, because `canonical_log_id`
 (`mod.rs:2458`) rewrites record ids after the table gets a page.
+
+Core looks up the name of a record id `-page` in two places
+(`mod.rs:2919-2999`). First it looks in the schemas by root page. Then it
+looks in the `sqlite_schema` versions in the version store. Both can miss. A DDL commit can install an old copy of
+the schema with the temporary root (#8004), and catalog GC drops the
+versions. Then the commit fails with `Corrupt` on every connection
+(`FINDINGS.md` row 27, `harness/repro/sync-object-map-8004.patch`).
+
+The model leaves out a row commit while another connection has an open
+DDL, a restart, and more than one row of a table. `DESIGN-schema.md`
+("Sync object map", "Left out") gives the reasons.
 
 ### The stable table id in the pull protocol
 
@@ -69,23 +80,34 @@ The rules for a permanent id:
 
 ## Open questions
 
-These are not verified.
-
-1. Possible id collision in the client map. Before its first checkpoint, a
-   table has `rootpage = -N`. `unsigned_abs()` turns it into N. A new table
-   at -5 and an old table at page 5 then get the same stable id 5. This is
-   the same pattern as #11501. To be a bug, a pull that copies pages must
-   see a table that no checkpoint published yet. That was not checked.
-2. The stable id changes at the first checkpoint of a table, from 5 to 6.
-   No code that handles this change was found. The sync tests were not
-   searched for it.
+1. Id collision in the client map. Answer: the state exists, and it also
+   breaks push. It is #11501. Before its first checkpoint, a table has
+   `rootpage = -N`. `unsigned_abs()` turns it into N. A new table at -10
+   and an old table at page 10 get the same stable id 10. A Rust test on
+   turso main at ae2cb7388 shows the push symptom (3 of 3 runs,
+   `harness/repro/sync-object-map-11501.patch`). `sqlite_schema` has
+   `t6 | 10` and `t7 | -10`. An `INSERT INTO t6` writes the record id -10.
+   The object map of that commit is `[{ mv_table_id: -10, name: "t7" }]`,
+   because the lookup finds `rootpage == -10` before `rootpage == 10`
+   (`table_name_for_rootpage_in_schema`, `core/mvcc/database/mod.rs:662-676`).
+   The push sends the row of `t6` as a row of `t7`. Not verified: that
+   `read_logical_replay_table_map` runs while a client database is in this
+   state. Bootstrap bumps `next_table_id` below every root page
+   (`mod.rs:4771-4781`), so a fresh replay cannot make the collision. It
+   needs a pass that gives page N to another table while a local `CREATE`
+   with id -N is open. Nobody traced whether the pull path can do that.
+2. The stable id changes at the first checkpoint of a table, from the
+   temporary id to the page. Answer: yes (`reachStableIdChanges` fails). The client changes its map only in two ways: pulled schema ops
+   and the rebuild after a page pull. The schema ops are `Create`,
+   `Refresh`, `Alter` and `Drop`
+   (`sync/engine/src/database_sync_operations.rs:486-497`). A pulled row with an unknown id fails the pull with
+   "unknown stable_table_id" (`:466-473`), so the failure is not silent.
+   The server sets `stable_table_id`, and its code is not here. Not
+   verified: whether it sends a `Refresh` at the change. A permanent id
+   does not remove the change, because the `rootpage` column still goes
+   from `-id` to the page.
 
 ## Next step
 
-Add the object map to `MvccPassiveSchema.qnt`. Each commit gets a map from
-id to name. A new invariant says that each log record finds the correct
-table name through the map of its own commit. Sync replays the log like
-recovery does, so this checks the promise that sync depends on. The same
-run checks question 1 for the code today and for a permanent id. The pull
-protocol stays out of the model. Its rule is: the stable id is the page
-number in the `rootpage` column of the B-tree.
+`DESIGN-schema.md`, section "Sync object map", has the model, the ten
+configurations and their results.
