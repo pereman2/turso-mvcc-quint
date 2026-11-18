@@ -844,7 +844,8 @@ The `keyByRoot` counterexample: `w1` allocates rowid 1 and does not commit, a
 checkpoint publishes page 2, and `w2` finds no cache under key 2, reads the
 committed max 0 and gets rowid 1. The engine replay of `reachRowidAcrossPublish`
 and `reachRowidPendingPair` (`rowid_cache_traces_conform`) gives the same rowids
-as the spec for `"on"` on turso 0c9fe0dd9. `sync_traces_conform` still passes. It cannot show the GC drop through rowids, because a
+as the spec for `"on"` on turso 0c9fe0dd9. `sync_traces_conform` still passes.
+It cannot show the GC drop through rowids, because a
 dropped table takes no more writes. Left out: deletes and rowid reuse, VACUUM,
 restart and recovery bumps, rollback restores, the random rowid fallback at
 `i64::MAX`, indexes. `RowidAcrossPublish` is a weak tag: it marks an allocation

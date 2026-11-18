@@ -4,4 +4,4 @@ reachRowidAcrossPublish: [violation] NeverRowidAcrossPublish (17 states trace)
 reachRowidPendingPair: [violation] NeverRowidPendingPair (8 states trace)
 reachRowidCacheGc: [violation] NeverCacheGcDropped (25 states trace)
 rowidCache and main, TypeOK, 200 samples x 30 steps: no violation
-The TLC runs and the engine replay did not run: no Mac slot came free.
+At the time of this log, the TLC runs and the engine replay had not run. They ran later: see tlc.log and replay.log.
