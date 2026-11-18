@@ -1,0 +1,10 @@
+test mvcc::database::tests::mbt_tests::schema::rowid_cache_traces_conform ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2634 filtered out; finished in 0.12s
+---- sync_traces_conform
+MvccPassiveSchema-reachMapsPageId: live rootpages checked after steps [1, 2, 3, 5, 6, 7, 8, 9, 14, 15, 22, 23, 24]
+MvccPassiveSchema-reachStableIdChanges: live rootpages checked after steps [1, 2, 9, 10, 11, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24]
+test mvcc::database::tests::mbt_tests::schema::sync_traces_conform ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2634 filtered out; finished in 0.25s
+DONE
+
+[exited with code 0]

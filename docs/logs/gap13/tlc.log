@@ -1,0 +1,13 @@
+== rowidCache
+ok   MvccPassiveSchema-rowidCache: no error (10773 states, 9s)
+== rowidKeyByRoot
+ok   MvccPassiveSchema-rowidKeyByRoot: NoRowidReuse fails as expected (586 states, 7s)
+== reachRowidAcrossPublish
+ok   MvccPassiveSchema-reachRowidAcrossPublish: NeverRowidAcrossPublish fails as expected (656 states, 7s)
+== reachRowidCacheGc
+ok   MvccPassiveSchema-reachRowidCacheGc: NeverCacheGcDropped fails as expected (9267 states, 7s)
+== reachRowidPendingPair
+ok   MvccPassiveSchema-reachRowidPendingPair: NeverRowidPendingPair fails as expected (63 states, 7s)
+== reachStableIdChanges
+ok   MvccPassiveSchema-reachStableIdChanges: NeverStableIdChanges fails as expected (747 states, 7s)
+DONE

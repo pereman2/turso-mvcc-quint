@@ -831,16 +831,20 @@ says that no writer holds a rowid that a committed row or another writer has.
 
 | Module | Result |
 |---|---|
-| `rowidCache` | Not verified with TLC yet |
-| `rowidKeyByRoot` | Simulator finds a `NoRowidReuse` violation in 17 states. TLC not run |
-| `reachRowidAcrossPublish`, `reachRowidPendingPair`, `reachRowidCacheGc` | Simulator finds each violation (17, 8 and 25 states). TLC not run |
-| `main`, `reachStableIdChanges` with `RowidCache = "off"` | Not verified with TLC yet |
+| `rowidCache` | No error, 10,773 states (TLC) |
+| `rowidKeyByRoot` | `NoRowidReuse` fails, 586 states (TLC) |
+| `reachRowidAcrossPublish` | Reached, 656 states (TLC) |
+| `reachRowidCacheGc` | Reached, 9,267 states (TLC) |
+| `reachRowidPendingPair` | Reached, 63 states (TLC) |
+| `reachStableIdChanges` with `RowidCache = "off"` | Reached, 747 states (TLC), as before |
+
+The logs are `docs/logs/gap13/tlc.log` and `docs/logs/gap13/replay.log`.
 
 The `keyByRoot` counterexample: `w1` allocates rowid 1 and does not commit, a
 checkpoint publishes page 2, and `w2` finds no cache under key 2, reads the
 committed max 0 and gets rowid 1. The engine replay of `reachRowidAcrossPublish`
 and `reachRowidPendingPair` (`rowid_cache_traces_conform`) gives the same rowids
-as the spec for `"on"`. It cannot show the GC drop through rowids, because a
+as the spec for `"on"` on turso 0c9fe0dd9. `sync_traces_conform` still passes. It cannot show the GC drop through rowids, because a
 dropped table takes no more writes. Left out: deletes and rowid reuse, VACUUM,
 restart and recovery bumps, rollback restores, the random rowid fallback at
 `i64::MAX`, indexes. `RowidAcrossPublish` is a weak tag: it marks an allocation
