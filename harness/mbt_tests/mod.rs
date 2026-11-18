@@ -6,6 +6,8 @@
 mod group;
 mod index;
 mod itf;
+#[cfg(feature = "conn_raw_api")]
+mod portable;
 mod rows;
 mod schema;
 
@@ -92,6 +94,16 @@ enum Failure {
     GcKept,
     /// GC dropped a version that the spec kept.
     GcDropped,
+    /// ObjectMapCorrect fails on the engine: the commit of a row fails with
+    /// "cannot resolve user data table id", or its object map does not
+    /// resolve the record id to the table of the row.
+    ObjectMap,
+    /// The engine and the spec disagree on a row commit: the INSERT result
+    /// against the spec omap value, or the form of the record id.
+    ObjectMapSpec,
+    /// The live sqlite_schema.rootpage of a table differs from the form of
+    /// the spec RootCol, or two live tables have the same abs(rootpage).
+    RootPage,
 }
 
 /// Why a replay stopped before the end of the trace.

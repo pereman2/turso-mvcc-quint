@@ -32,6 +32,10 @@ pub(super) struct SchemaDriver {
     ddl_stop: Arc<StopAt>,
     ddl: Option<Ddl>,
     writer: Arc<Connection>,
+    /// Reads the live sqlite_schema after each step of a sync trace.
+    probe: Arc<Connection>,
+    /// The steps after which check_root_columns compared the live rootpages.
+    root_checked_steps: Vec<usize>,
     readers: HashMap<String, (Arc<Connection>, Reader)>,
     /// The rowid of the sqlite_schema row and the table id of each created
     /// spec table.
@@ -50,7 +54,7 @@ fn ck_owner(step: &Step) -> &str {
 }
 
 impl Driver for SchemaDriver {
-    fn run_step(&mut self, _index: usize, step: &Step) -> StepOutcome {
+    fn run_step(&mut self, index: usize, step: &Step) -> StepOutcome {
         match step.action.as_str() {
             "DdlExec" => self.ddl_exec(step)?,
             "DdlPrepare" => self.ddl_prepare()?,
@@ -96,6 +100,7 @@ impl Driver for SchemaDriver {
         }
         self.check_cookie()?;
         self.check_catalog_chains(step)?;
+        self.check_root_columns(index, step)?;
         self.check_recovery(step)
     }
 }
@@ -125,6 +130,7 @@ impl SchemaDriver {
         let ck = Checkpointer::new(&db, db.get_mvcc_store());
         let (ddl_conn, ddl_stop) = connect_with_stop(&db);
         let writer = db.connect();
+        let probe = db.connect();
         Self {
             io: ck.io.clone(),
             db,
@@ -133,6 +139,8 @@ impl SchemaDriver {
             ddl_stop,
             ddl: None,
             writer,
+            probe,
+            root_checked_steps: Vec::new(),
             readers: HashMap::new(),
             schema_rowids: HashMap::new(),
             table_ids: HashMap::new(),
@@ -418,9 +426,174 @@ impl SchemaDriver {
     fn write_row(&mut self, step: &Step) -> StepOutcome {
         let table = step.pick("o").str();
         let ts = step.var("ins").get_str(table).field("ts").int();
-        self.writer
-            .execute(format!("INSERT INTO {table} VALUES (1, {ts})"))
-            .unwrap();
+        // With SyncObjectMap the spec records the object map of this commit:
+        // the table name, "-" (no name, the commit fails) or "?".
+        let spec = step
+            .vars
+            .get("omap")
+            .map(|omap| omap.get_str(table).str().to_string())
+            .filter(|name| !name.is_empty());
+        if spec.is_some() {
+            self.writer.set_portable_logical_changes_enabled(true);
+        }
+        let result = self
+            .writer
+            .execute(format!("INSERT INTO {table} VALUES (1, {ts})"));
+        let Some(spec) = spec else {
+            result.unwrap_or_else(|err| panic!("INSERT INTO {table} failed: {err}"));
+            return Ok(());
+        };
+        match result {
+            Ok(_) if spec != table => fail(
+                Failure::ObjectMapSpec,
+                format!("INSERT INTO {table} succeeded, the spec object map gives {spec:?}"),
+            ),
+            Ok(_) => self.check_object_map(step, table),
+            // populate_portable_changes found no name for the record id
+            // (core/mvcc/database/mod.rs:2999).
+            Err(err) if err.to_string().contains("cannot resolve user data table id") => {
+                if spec != "-" {
+                    return fail(
+                        Failure::ObjectMapSpec,
+                        format!("INSERT INTO {table} failed ({err}), the spec object map gives {spec:?}"),
+                    );
+                }
+                fail(
+                    Failure::ObjectMap,
+                    format!("INSERT INTO {table} failed: {err}"),
+                )
+            }
+            Err(err) => panic!("INSERT INTO {table} failed: {err}"),
+        }
+    }
+
+    /// ObjectMapCorrect on the engine. The newest commit frame has one table
+    /// row record. Its table id has the form of the spec record (the
+    /// temporary id or -page). The object map of the same frame resolves
+    /// that id to the table, and no entry names another table.
+    #[cfg(feature = "conn_raw_api")]
+    fn check_object_map(&self, step: &Step, table: &str) -> StepOutcome {
+        let temp_form = step.var("ins").get_str(table).field("id").int()
+            == step.var("tid").get_str(table).int();
+        let table_id = self.table_ids[table];
+        let want_id = if temp_form {
+            i64::from(table_id)
+        } else {
+            match self.ck.mv.current_root_page(&table_id) {
+                Some(page) => -(page as i64),
+                None => {
+                    return fail(
+                        Failure::ObjectMapSpec,
+                        format!(
+                            "the spec record of {table} carries -page, the engine table has none"
+                        ),
+                    )
+                }
+            }
+        };
+        let last = super::portable::last_commit(&self.writer);
+        if last.record_ts.is_none() || last.record_ts != last.map_ts || last.record_ids.len() != 1 {
+            return fail(
+                Failure::ObjectMapSpec,
+                format!("the newest commit is not one row record with an object map: {last:?}"),
+            );
+        }
+        let record_id = last.record_ids[0];
+        if record_id != want_id {
+            return fail(
+                Failure::ObjectMapSpec,
+                format!(
+                    "the record of {table} carries {record_id}, the spec form gives {want_id} \
+                     (temporary id: {temp_form})"
+                ),
+            );
+        }
+        let named = last
+            .objects
+            .iter()
+            .any(|(id, name)| *id == record_id && name == table);
+        if !named || last.objects.iter().any(|(_, name)| name != table) {
+            return fail(
+                Failure::ObjectMap,
+                format!("record id {record_id} of {table}, engine object map: {:?}", last.objects),
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(not(feature = "conn_raw_api"))]
+    fn check_object_map(&self, _step: &Step, _table: &str) -> StepOutcome {
+        refuse("the object map needs the cargo feature conn_raw_api")
+    }
+
+    /// StableIdsDistinct and RootCol on the engine, after every step of a
+    /// sync trace. A probe connection reads the live sqlite_schema. Each spec
+    /// table that is live in the spec has a row there, and no other spec
+    /// table does. Its rootpage has the form of RootCol: the temporary id of
+    /// the engine table, or the engine page of its binding. The live tables
+    /// have distinct abs(rootpage). The check skips a state with a Preparing
+    /// DDL, whose row a reader may or may not see.
+    fn check_root_columns(&mut self, index: usize, step: &Step) -> StepOutcome {
+        if !step.vars.contains_key("omap") || step.var("ddl").field("pc").str() == "preparing" {
+            return Ok(());
+        }
+        let rows = query_rows(
+            &self.probe,
+            "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table'",
+        )
+        .unwrap();
+        let rows: Vec<(String, i64)> = rows
+            .iter()
+            .map(|row| (row[0].to_string(), row[1].as_int().unwrap()))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        for (name, root) in &rows {
+            if !seen.insert(root.unsigned_abs()) {
+                return fail(
+                    Failure::RootPage,
+                    format!("two live tables have stable id {}: {rows:?}", root.unsigned_abs()),
+                );
+            }
+            let _ = name;
+        }
+        let tid = step.var("tid");
+        let bind = step.var("bind");
+        for (table, cat) in step.var("cat").entries() {
+            let table = table.str();
+            let created = cat.field("c").int() != 0;
+            let dropped = cat.field("d").int() != 1000;
+            let engine = rows.iter().find(|(name, _)| name == table).map(|(_, root)| *root);
+            match (created && !dropped, engine) {
+                (false, None) => continue,
+                (live, engine) if live != engine.is_some() => {
+                    return fail(
+                        Failure::RootPage,
+                        format!("{table}: live in the spec {live}, engine rootpage {engine:?}"),
+                    )
+                }
+                _ => {}
+            }
+            let root = engine.unwrap();
+            let b = bind.get_str(table);
+            let spec_page = b.field("in").bool() && b.field("root").int() > 0;
+            let table_id = self.table_ids[table];
+            let want = if spec_page {
+                self.ck.mv.current_root_page(&table_id).map(|p| p as i64)
+            } else {
+                Some(i64::from(table_id))
+            };
+            if Some(root) != want {
+                return fail(
+                    Failure::RootPage,
+                    format!(
+                        "{table}: rootpage {root}, spec RootCol {} (page: {spec_page}), \
+                         engine form gives {want:?}",
+                        if spec_page { b.field("root").int() } else { tid.get_str(table).int() }
+                    ),
+                );
+            }
+        }
+        self.root_checked_steps.push(index);
         Ok(())
     }
 
@@ -596,6 +769,83 @@ fn catalog_traces_conform() {
     for (name, trace) in CATALOG_TRACES {
         let replayed = replay(name, trace, Expect::Conforms, &mut SchemaDriver::new());
         assert_eq!(replayed, Replay::Done, "{name} was refused");
+    }
+}
+
+/// #8004 also breaks sync push: a DDL commit installs its old copy of the
+/// schema, so the shared schema keeps the temporary root of t2 after the
+/// checkpoint gave t2 a page. Catalog GC drops the sqlite_schema versions of
+/// t2, and the object map of the next INSERT INTO t2 finds no name: the
+/// commit fails with Corrupt. The spec omap is "-" at that step, so the
+/// engine and the spec agree (no ObjectMapSpec), and the promise fails
+/// (ObjectMap). When the fix lands, this trace stops failing and the test
+/// must expect Conforms.
+#[cfg(feature = "conn_raw_api")]
+#[test]
+fn issue_8004_sync_trace_fails_insert() {
+    let replayed = replay(
+        "MvccPassiveSchema-issue8004Sync",
+        include_str!("traces/MvccPassiveSchema-issue8004Sync.itf.json"),
+        Expect::Violation {
+            step: 18,
+            kind: Failure::ObjectMap,
+        },
+        &mut SchemaDriver::new(),
+    );
+    assert_eq!(replayed, Replay::Done);
+}
+
+/// reachMapsInPass: a row commits with its temporary id while a pass that
+/// creates its B-tree is open. The object map of that commit names the table,
+/// as the spec says. The same commit is the #11502 shape: after a crash,
+/// recovery knows the table only by its page and loses the row. The spec
+/// sync modules have FixPersistIds, so the recovery check fails at the same
+/// step. When #11502 is fixed, this trace must conform.
+#[cfg(feature = "conn_raw_api")]
+#[test]
+fn map_in_pass_trace_conforms_until_issue_11502() {
+    let replayed = replay(
+        "MvccPassiveSchema-reachMapsInPass",
+        include_str!("traces/MvccPassiveSchema-reachMapsInPass.itf.json"),
+        Expect::Violation {
+            step: 19,
+            kind: Failure::RecoveryRows,
+        },
+        &mut SchemaDriver::new(),
+    );
+    assert_eq!(replayed, Replay::Done);
+}
+
+/// Sync object map traces of the design:
+/// - reachMapsPageId: a row record carries -page, and the object map names
+///   its table.
+/// - reachStableIdChanges: a row record carried the temporary id, and the
+///   rootpage column now holds the page.
+#[cfg(feature = "conn_raw_api")]
+const SYNC_TRACES: [(&str, &str); 2] = [
+    (
+        "MvccPassiveSchema-reachMapsPageId",
+        include_str!("traces/MvccPassiveSchema-reachMapsPageId.itf.json"),
+    ),
+    (
+        "MvccPassiveSchema-reachStableIdChanges",
+        include_str!("traces/MvccPassiveSchema-reachStableIdChanges.itf.json"),
+    ),
+];
+
+#[cfg(feature = "conn_raw_api")]
+#[test]
+fn sync_traces_conform() {
+    for (name, trace) in SYNC_TRACES {
+        let mut driver = SchemaDriver::new();
+        let replayed = replay(name, trace, Expect::Conforms, &mut driver);
+        assert_eq!(replayed, Replay::Done, "{name} was refused");
+        println!("{name}: live rootpages checked after steps {:?}", driver.root_checked_steps);
+        assert!(!driver.root_checked_steps.is_empty(), "{name}: no rootpage check ran");
+        if name.ends_with("reachStableIdChanges") {
+            // The CheckpointPublish that gives the table its page.
+            assert!(driver.root_checked_steps.contains(&24), "{name}: step 24 not checked");
+        }
     }
 }
 
