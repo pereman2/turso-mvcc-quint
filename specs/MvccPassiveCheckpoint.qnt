@@ -133,6 +133,10 @@ module MvccPassiveCheckpoint {
   const GuardPruneReferenced: bool  // prune skips TxIDs that collect_referenced_txids saw
   const RemoveTxBeforeRewrite: bool // what-if: remove_tx can run before the TxID rewrite
 
+  // The TxID rewrite after CommitEnd (gap 22). false / true in the main configuration.
+  const ModelCommitEndRewrite: bool // WriteFinish is three steps: CommitEnd, rewrite, FinalizeCommit
+  const RewriteResetsMat: bool      // the rewrite sets materialized_at to ORIGIN (the engine); false is the fix
+
   // Trace replay only. Each one makes the spec take only the steps that the
   // engine can take. false in every configuration that is model checked.
   const BackfillToLimit: bool      // the backfill copies every frame up to
@@ -185,6 +189,8 @@ module MvccPassiveCheckpoint {
   // WritersPinMarks.
   type Inflight = { ts: int, k: str, v: int, logged: bool, marked: bool, omat: int,
                     mark: int }
+  // A commit between CommitEnd and FinalizeCommit (ModelCommitEndRewrite).
+  type Ending = { i: Inflight, rewritten: bool }
   type WalFrame = { w: str -> int, meta: int }
   type Cand = { k: str, s: int }
   type CkState = { pc: str, owner: str, snap: int, old: int, todo: Set[str], wset: str -> int,
@@ -232,6 +238,7 @@ module MvccPassiveCheckpoint {
   var markFails: int             // Number of failed re-marks so far.
   var gcs: GcState               // Sampled GC values when GC runs in two steps.
   var rmw: Set[Rmw]              // History: updates that passed validation, with begin and commit ts.
+  var ending: Set[Ending]        // Commits between CommitEnd and FinalizeCommit (ModelCommitEndRewrite).
   var fin: FinState              // finalized_tx_states and the TxID rewrite (ModelFinalizedPrune).
 
   // ---------------------------------------------------------------------------
@@ -334,6 +341,7 @@ module MvccPassiveCheckpoint {
     markFails' = 0,
     gcs' = { pc: "idle", lwm: 0, floor: 0 },
     rmw' = Set(),
+    ending' = Set(),
     fin' = { retiring: Set(), finalized: Set(), unrewritten: Set(), pc: "idle", ref: Set(),
              pruned: Set(), fired: false, pins: Set() },
   }
@@ -343,6 +351,7 @@ module MvccPassiveCheckpoint {
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
     fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
     rmw' = rmw,
+    ending' = ending,
     fin' = fin,
   }
 
@@ -402,13 +411,14 @@ module MvccPassiveCheckpoint {
     logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, lateMarks' = lateMarks, UnchangedFullScan,
     gcs' = gcs,
+    ending' = ending,
     fin' = fin,
   }
 
   action WriteLogAppend(i: Inflight): bool = all {
     not(i.logged),
     i.marked,
-    not(LogAppendOneAtATime and inflight.exists(j => j.logged)),
+    not(LogAppendOneAtATime and (inflight.exists(j => j.logged) or ending != Set())),
     llog' = llog.union(Set({ ts: i.ts, k: i.k, v: i.v })),
     logged' = logged.union(Set({ ts: i.ts, k: i.k, v: i.v })),
     inflight' = inflight.exclude(Set(i)).union(Set({ ...i, logged: true })),
@@ -421,6 +431,7 @@ module MvccPassiveCheckpoint {
 
   action WriteFinish(i: Inflight): bool = all {
     i.logged,
+    not(ModelCommitEndRewrite),
     inflight' = inflight.exclude(Set(i)),
     lastCommitted' = Max(Set(lastCommitted, i.ts)),
     lateMarks' = if (DirtyKeys and not(GuardMarkBeforeCommitEnd))
@@ -431,6 +442,7 @@ module MvccPassiveCheckpoint {
     ck' = ck, nCk' = nCk, rd' = rd, writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, UnchangedFullScan,
     gcs' = gcs,
+    ending' = ending,
     fin' = if (ModelFinalizedPrune)
              { ...fin, retiring: fin.retiring.union(Set(i.ts)),
                unrewritten: if (RemoveTxBeforeRewrite) fin.unrewritten.union(Set(i.ts))
@@ -443,11 +455,81 @@ module MvccPassiveCheckpoint {
            else fin,
   }
 
+  // CommitEnd (gap 22): the commit is Committed in txs, so readers and the
+  // snapshot see it as resolved. last_committed_tx_ts does not change yet. The
+  // dirty mark after CommitEnd (lateMarks) belongs to this step.
+  action WriteCommitEnd(i: Inflight): bool = all {
+    ModelCommitEndRewrite,
+    i.logged,
+    inflight' = inflight.exclude(Set(i)),
+    ending' = ending.union(Set({ i: i, rewritten: false })),
+    lateMarks' = if (DirtyKeys and not(GuardMarkBeforeCommitEnd))
+                   lateMarks.union(Set({ k: i.k, ts: i.ts }))
+                 else lateMarks,
+    clock' = clock, chain' = chain, lastCommitted' = lastCommitted, llog' = llog,
+    wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+    backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, writes' = writes,
+    logged' = logged, err' = err,
+    aborted' = aborted, readDeps' = readDeps, dirty' = dirty, UnchangedFullScan,
+    gcs' = gcs,
+    fin' = fin,
+  }
+
+  pure def Touches(v: Version, t: int): bool = v.b == t or v.e == t
+
+  // rewrite_txid_to_timestamp: set_begin / set_end reset materialized_at. The
+  // model stores the timestamp already, so only mat changes.
+  action WriteRewriteTxId(e: Ending): bool = {
+    val t = e.i.ts
+    all {
+      not(e.rewritten),
+      chain' = chain.set(e.i.k, chain.get(e.i.k).map(v =>
+                 if (RewriteResetsMat and Touches(v, t)) { ...v, mat: 0 } else v)),
+      ck' = if (chain.get(e.i.k).exists(v => Touches(v, t) and v.mat != 0))
+              { ...ck, seen: ck.seen.union(Set("rewroteStamped")) }
+            else ck,
+      ending' = ending.exclude(Set(e)).union(Set({ ...e, rewritten: true })),
+      clock' = clock, inflight' = inflight, lastCommitted' = lastCommitted, llog' = llog,
+      wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, nCk' = nCk, rd' = rd, writes' = writes,
+      logged' = logged, err' = err,
+      aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
+      UnchangedFullScan,
+      gcs' = gcs,
+      fin' = fin,
+    }
+  }
+
+  // FinalizeCommit: the rest of the old WriteFinish.
+  action WriteFinalize(e: Ending): bool = {
+    val i = e.i
+    all {
+      e.rewritten,
+      ending' = ending.exclude(Set(e)),
+      lastCommitted' = Max(Set(lastCommitted, i.ts)),
+      clock' = clock, inflight' = inflight, chain' = chain, llog' = llog, wal' = wal,
+      nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta, durable' = durable,
+      backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, writes' = writes,
+      logged' = logged, err' = err,
+      aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
+      UnchangedFullScan,
+      gcs' = gcs,
+      fin' = if (ModelFinalizedPrune)
+               { ...fin, retiring: fin.retiring.union(Set(i.ts)),
+                 unrewritten: if (RemoveTxBeforeRewrite) fin.unrewritten.union(Set(i.ts))
+                              else fin.unrewritten,
+                 pins: if (WritersPinMarks) fin.pins.union(Set({ ts: i.ts, mark: i.mark }))
+                       else fin.pins }
+             else fin,
+    }
+  }
+
   // remove_tx (mod.rs:6823-6861): the insert into finalized_tx_states and the
   // removal from txs are one step here. still_retiring is not modeled.
   action WriteRemoveTx(t: int): bool = all {
     ModelFinalizedPrune,
     fin.retiring.contains(t),
+    ending' = ending,
     fin' = { ...fin, retiring: fin.retiring.exclude(Set(t)), finalized: fin.finalized.union(Set(t)),
              pins: fin.pins.filter(p => p.ts != t) },
     clock' = clock, chain' = chain, inflight' = inflight, lastCommitted' = lastCommitted,
@@ -465,6 +547,7 @@ module MvccPassiveCheckpoint {
     ModelFinalizedPrune,
     RemoveTxBeforeRewrite,
     fin.unrewritten.contains(t),
+    ending' = ending,
     fin' = { ...fin, unrewritten: fin.unrewritten.exclude(Set(t)) },
     clock' = clock, chain' = chain, inflight' = inflight, lastCommitted' = lastCommitted,
     llog' = llog, wal' = wal, nBackfill' = nBackfill, db' = db, dbMeta' = dbMeta,
@@ -484,6 +567,7 @@ module MvccPassiveCheckpoint {
     durable' = durable, backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd,
     writes' = writes, logged' = logged, err' = err,
     aborted' = aborted, readDeps' = readDeps, UnchangedFullScan, gcs' = gcs,
+    ending' = ending,
     fin' = fin,
   }
 
@@ -537,6 +621,7 @@ module MvccPassiveCheckpoint {
       backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, logged' = logged,
       err' = err,
       readDeps' = readDeps, lateMarks' = lateMarks, gcs' = gcs,
+      ending' = ending,
       fin' = fin,
     }
   }
@@ -653,6 +738,7 @@ module MvccPassiveCheckpoint {
       UnchangedForReadersExceptCk,
       aborted' = aborted, dirty' = dirty, lateMarks' = lateMarks, UnchangedFullScan,
       gcs' = gcs,
+      ending' = ending,
       fin' = fin,
     }
   }
@@ -732,6 +818,7 @@ module MvccPassiveCheckpoint {
       nCk' = nCk, logged' = logged, err' = err,
       aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
       fullGen' = fullGen, fullMin' = fullMin, markFails' = markFails, gcs' = gcs,
+      ending' = ending,
       fin' = fin,
     }
   }
@@ -975,6 +1062,7 @@ module MvccPassiveCheckpoint {
       dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor, nCk' = nCk,
       UnchangedForCheckpoint,
       aborted' = aborted, readDeps' = readDeps, lateMarks' = lateMarks, gcs' = gcs,
+      ending' = ending,
       fin' = fin,
     }
   }
@@ -1003,6 +1091,7 @@ module MvccPassiveCheckpoint {
     UnchangedForCheckpoint,
     aborted' = aborted, readDeps' = readDeps, dirty' = dirty, lateMarks' = lateMarks,
     fullMin' = fullMin, markFails' = markFails, gcs' = gcs, rmw' = rmw,
+    ending' = ending,
     fin' = fin,
   }
 
@@ -1281,6 +1370,7 @@ module MvccPassiveCheckpoint {
     GcSamplesFirst,
     gcs.pc == "idle",
     gcs' = { pc: "sampled", lwm: Lwm, floor: GcFloor },
+    ending' = ending,
     fin' = fin,
     chain' = chain,
     ck' = ck,
@@ -1306,6 +1396,7 @@ module MvccPassiveCheckpoint {
   action GcEnd: bool = all {
     gcs.pc == "sampled",
     gcs' = { pc: "idle", lwm: 0, floor: 0 },
+    ending' = ending,
     fin' = fin,
     chain' = chain,
     ck' = ck,
@@ -1326,6 +1417,7 @@ module MvccPassiveCheckpoint {
   action FinPruneCollect: bool = all {
     ModelFinalizedPrune,
     fin.pc == "idle",
+    ending' = ending,
     fin' = { ...fin, pc: "collected",
              ref: fin.unrewritten.union(InflightTs).filter(t => Keys.exists(k =>
                     chain.get(k).exists(v => v.b == t or v.e == t))) },
@@ -1343,6 +1435,7 @@ module MvccPassiveCheckpoint {
       (not(GuardPruneReferenced) or not(fin.ref.contains(t))) and not(fin.retiring.contains(t)))
     all {
       fin.pc == "collected",
+      ending' = ending,
       fin' = { ...fin, finalized: fin.finalized.exclude(drop), pruned: fin.pruned.union(drop),
                pc: "idle", ref: Set(),
                fired: fin.fired or (GuardPruneReferenced and fin.finalized.exists(t => fin.ref.contains(t))) },
@@ -1389,7 +1482,12 @@ module MvccPassiveCheckpoint {
     all {
       inflight != Set(),
       nondet i = inflight.oneOf()
-      any { WriteMarkDirty(i), WriteLogAppend(i), WriteFinish(i), WriteAbort(i) },
+      any { WriteMarkDirty(i), WriteLogAppend(i), WriteFinish(i), WriteCommitEnd(i), WriteAbort(i) },
+    },
+    all {
+      ending != Set(),
+      nondet e = ending.oneOf()
+      any { WriteRewriteTxId(e), WriteFinalize(e) },
     },
     all {
       lateMarks != Set(),
@@ -1551,6 +1649,8 @@ module MvccPassiveCheckpoint {
   val NeverBlockingDropsSuperseded: bool = not(ck.seen.contains("b2DropWithReader"))
   val NeverBlockingDropsCurrent: bool = not(ck.seen.contains("b3Drop"))
   val NeverBlockingFailsAfterPublish: bool = not(ck.seen.contains("blockingFailedPublished"))
+  // Gap 22: the TxID rewrite resets the stamp of a version that a pass stamped.
+  val NeverRewritesStamped: bool = not(ck.seen.contains("rewroteStamped"))
   val NeverStampAtRestart: bool = not(ck.seen.contains("stampedAtRestart"))
 
   val NeverFailsAfterPublish: bool = not(ck.seen.contains("failedPublished"))
