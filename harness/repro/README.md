@@ -229,3 +229,31 @@ Duplicate search, `gh issue list -R tursodatabase/turso --state all --search`
 on 2026-11-18: "synchronous NORMAL", "power loss", "logical log truncate" and
 "passive checkpoint busy". The nearest issues are #7952 (closed, the backfill
 fsync that this path skips), #11507 and #12005 (other causes). No duplicate.
+
+## mvcc-log-fsync-error-commits.patch
+
+The patch applies to turso main at `624ed32db`. It adds a new file
+`core/mvcc/database/log_fsync_error_tests.rs` and registers it in
+`core/mvcc/database/tests.rs`. It changes no engine code. The tests use a
+`FaultIo` like the one in `group-commit-rows-21-22.patch`, plus a switch that
+makes one fsync of the `-log` file fail. Row 30.
+
+| Test | Expected | Actual on 624ed32db |
+|---|---|---|
+| `failed_log_fsync_must_not_leave_visible_but_lost_row` | After the INSERT returns an error, a new reader does not see pk 1, or a power loss restores it | The reader sees `[1]`, a power loss recovers `[]`, and a second INSERT fails with a UNIQUE error |
+| `dropped_plain_commit_must_not_leave_visible_but_lost_row` | The same, for a plain COMMIT dropped at `LogRecordMarkedWritten` | The reader sees `[1]`, a power loss recovers `[]` |
+
+```bash
+git -C <turso> checkout 624ed32db
+git -C <turso> apply <this repo>/harness/repro/mvcc-log-fsync-error-commits.patch
+cd <turso>
+cargo test -p turso_core --lib log_fsync_error_tests -- --nocapture --test-threads=1
+```
+
+Both tests failed in 3 of 3 runs on `624ed32db`. On 2026-11-18 the patch also
+applied to turso main `3fcfb6fc98` on a clean checkout. The command below ran 3
+times there, and each run gave 0 passed and 2 failed, with the same values.
+
+```bash
+cargo test -j6 -p turso_core --lib log_fsync_error_tests -- --nocapture --test-threads=1
+```

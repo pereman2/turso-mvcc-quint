@@ -1,0 +1,275 @@
+diff --git a/core/mvcc/database/log_fsync_error_tests.rs b/core/mvcc/database/log_fsync_error_tests.rs
+new file mode 100644
+index 000000000..3da6604da
+--- /dev/null
++++ b/core/mvcc/database/log_fsync_error_tests.rs
+@@ -0,0 +1,258 @@
++// Reproducers for the MVCC non-group commit path when the fsync of the
++// logical log fails, or the COMMIT is dropped before that fsync.
++// See harness/repro/README.md of pereman2/turso-mvcc-quint.
++
++use super::{get_rows, FixedYieldInjector};
++use crate::io::{File, FileId, FileSyncType};
++use crate::mvcc::database::CommitYieldPoint;
++use crate::mvcc::yield_hooks::YieldPointMarker;
++use crate::security::roles::SessionRole;
++use crate::{
++    Buffer, Clock, Completion, ConnectOpts, Connection, Database, EngineDialect, LimboError,
++    MemoryIO, MonotonicInstant, OpenFlags, Result, Statement, StepResult, SyncMode,
++    WallClockInstant, IO,
++};
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::sync::Arc;
++use std::sync::Mutex as StdMutex;
++
++/// The bytes of one file as the OS shows them, and as of the last fsync.
++#[derive(Default)]
++struct Shadow {
++    current: Vec<u8>,
++    durable: Vec<u8>,
++}
++
++fn apply(shadow: &StdMutex<Shadow>, pos: u64, data: &[u8]) {
++    let mut s = shadow.lock().unwrap();
++    let end = pos as usize + data.len();
++    if s.current.len() < end {
++        s.current.resize(end, 0);
++    }
++    s.current[pos as usize..end].copy_from_slice(data);
++}
++
++/// A `MemoryIO` that keeps the fsynced bytes of each file, so that a test
++/// can open the files as a power loss leaves them.
++#[derive(Default)]
++struct FaultIo {
++    inner: MemoryIO,
++    files: StdMutex<BTreeMap<String, Arc<StdMutex<Shadow>>>>,
++    /// When set, the next fsync of a `-log` file fails once.
++    fail_log_sync: Arc<AtomicBool>,
++}
++
++impl FaultIo {
++    fn mark_all_durable(&self) {
++        for shadow in self.files.lock().unwrap().values() {
++            let mut s = shadow.lock().unwrap();
++            s.durable = s.current.clone();
++        }
++    }
++
++    /// The files as a process crash (`false`) or a power loss (`true`)
++    /// leaves them.
++    fn snapshot(&self, power_loss: bool) -> BTreeMap<String, Vec<u8>> {
++        self.files
++            .lock()
++            .unwrap()
++            .iter()
++            .map(|(path, shadow)| {
++                let s = shadow.lock().unwrap();
++                let bytes = if power_loss { &s.durable } else { &s.current };
++                (path.clone(), bytes.clone())
++            })
++            .collect()
++    }
++}
++
++impl Clock for FaultIo {
++    fn current_time_monotonic(&self) -> MonotonicInstant {
++        self.inner.current_time_monotonic()
++    }
++    fn current_time_wall_clock(&self) -> WallClockInstant {
++        self.inner.current_time_wall_clock()
++    }
++}
++
++impl IO for FaultIo {
++    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Arc<dyn File>> {
++        let inner = self.inner.open_file(path, flags, direct)?;
++        let shadow = self
++            .files
++            .lock()
++            .unwrap()
++            .entry(path.to_string())
++            .or_default()
++            .clone();
++        Ok(Arc::new(FaultFile {
++            inner,
++            shadow,
++            is_log: path.ends_with("-log"),
++            fail_log_sync: self.fail_log_sync.clone(),
++        }))
++    }
++    fn remove_file(&self, path: &str) -> Result<()> {
++        self.files.lock().unwrap().remove(path);
++        self.inner.remove_file(path)
++    }
++    fn file_id(&self, path: &str) -> Result<FileId> {
++        self.inner.file_id(path)
++    }
++}
++
++struct FaultFile {
++    inner: Arc<dyn File>,
++    shadow: Arc<StdMutex<Shadow>>,
++    is_log: bool,
++    fail_log_sync: Arc<AtomicBool>,
++}
++
++impl File for FaultFile {
++    fn lock_file(&self, exclusive: bool) -> Result<()> {
++        self.inner.lock_file(exclusive)
++    }
++    fn unlock_file(&self) -> Result<()> {
++        self.inner.unlock_file()
++    }
++    fn pread(&self, pos: u64, c: Completion) -> Result<Completion> {
++        self.inner.pread(pos, c)
++    }
++    fn pwrite(&self, pos: u64, buffer: Arc<Buffer>, c: Completion) -> Result<Completion> {
++        apply(&self.shadow, pos, buffer.as_slice());
++        self.inner.pwrite(pos, buffer, c)
++    }
++    fn sync(&self, c: Completion, sync_type: FileSyncType) -> Result<Completion> {
++        if self.is_log && self.fail_log_sync.swap(false, Ordering::SeqCst) {
++            return Err(LimboError::InternalError("injected log fsync error".into()));
++        }
++        {
++            let mut s = self.shadow.lock().unwrap();
++            s.durable = s.current.clone();
++        }
++        self.inner.sync(c, sync_type)
++    }
++    fn size(&self) -> Result<u64> {
++        self.inner.size()
++    }
++    fn truncate(&self, len: u64, c: Completion) -> Result<Completion> {
++        self.shadow.lock().unwrap().current.truncate(len as usize);
++        self.inner.truncate(len, c)
++    }
++}
++
++fn open_fault_db(path: &str) -> (Arc<Database>, Arc<FaultIo>) {
++    let io = Arc::new(FaultIo::default());
++    let db = Database::open_file(io.clone(), path, Arc::new(EngineDialect)).unwrap();
++    let setup = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    for sql in [
++        "PRAGMA journal_mode = 'mvcc'",
++        "CREATE TABLE t(pk INTEGER PRIMARY KEY, v INTEGER)",
++        "PRAGMA mvcc_checkpoint_threshold = -1",
++    ] {
++        setup.execute(sql).unwrap();
++    }
++    io.mark_all_durable();
++    (db, io)
++}
++
++fn pks(conn: &Arc<Connection>) -> Vec<i64> {
++    get_rows(conn, "SELECT pk FROM t ORDER BY pk")
++        .iter()
++        .map(|row| row[0].as_int().unwrap())
++        .collect()
++}
++
++/// Opens a copy of `files` as a restart after a crash leaves them, and reads `t`.
++fn recover(files: &BTreeMap<String, Vec<u8>>, db_path: &str) -> Vec<i64> {
++    let dir = tempfile::TempDir::new().unwrap();
++    for (path, bytes) in files {
++        if !path.ends_with("-tshm") {
++            std::fs::write(dir.path().join(path), bytes).unwrap();
++        }
++    }
++    let io = Arc::new(crate::io::PlatformIO::new().unwrap());
++    let path = dir.path().join(db_path);
++    let db = Database::open_file(io, path.to_str().unwrap(), Arc::new(EngineDialect)).unwrap();
++    pks(&db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap())
++}
++
++fn step_to_yield(stmt: &mut Statement) {
++    for _ in 0..10_000 {
++        match stmt.step().unwrap() {
++            StepResult::Yield => return,
++            StepResult::IO => continue,
++            other => panic!("expected a yield, got {other:?}"),
++        }
++    }
++    panic!("statement never yielded")
++}
++
++/// A plain autocommit INSERT on FULL whose logical log fsync fails. The
++/// client gets an error. Then either no reader may see the row, or the row
++/// must survive a power loss.
++#[test]
++fn failed_log_fsync_must_not_leave_visible_but_lost_row() {
++    let (db, io) = open_fault_db("fsyncerr.db");
++    let conn = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    conn.set_sync_mode(SyncMode::Full);
++    io.fail_log_sync.store(true, Ordering::SeqCst);
++    let insert = conn.execute("INSERT INTO t VALUES (1, 1)");
++    assert!(insert.is_err(), "the INSERT must report the fsync error");
++    assert!(
++        !io.fail_log_sync.load(Ordering::SeqCst),
++        "the injected fsync error did not fire"
++    );
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let seen = pks(&reader);
++    let after_power_loss = recover(&io.snapshot(true), "fsyncerr.db");
++    let retry = conn.execute("INSERT INTO t VALUES (1, 1)");
++    println!(
++        "INSERT error: {:?}; new reader sees {seen:?}; a power loss recovers {after_power_loss:?}; retry of the INSERT: {:?}",
++        insert.as_ref().err(),
++        retry.as_ref().err()
++    );
++    assert!(
++        seen.is_empty() || after_power_loss == vec![1],
++        "the client got an error, but a new reader sees {seen:?} and a power loss recovers {after_power_loss:?}"
++    );
++}
++
++/// A plain BEGIN, INSERT, COMMIT that drops at `LogRecordMarkedWritten`,
++/// before the fsync. Same expectation as above.
++#[test]
++fn dropped_plain_commit_must_not_leave_visible_but_lost_row() {
++    let (db, io) = open_fault_db("dropplain.db");
++    let conn = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    conn.set_sync_mode(SyncMode::Full);
++    conn.execute("BEGIN").unwrap();
++    conn.execute("INSERT INTO t VALUES (1, 1)").unwrap();
++    conn.set_yield_injector(Some(FixedYieldInjector::new([
++        CommitYieldPoint::LogRecordMarkedWritten.point(),
++    ])));
++    {
++        let mut commit = conn.prepare("COMMIT").unwrap();
++        step_to_yield(&mut commit);
++    }
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let seen = pks(&reader);
++    let after_power_loss = recover(&io.snapshot(true), "dropplain.db");
++    println!("reader sees {seen:?}; a power loss recovers {after_power_loss:?}");
++    assert!(
++        seen.is_empty() || after_power_loss == vec![1],
++        "the COMMIT was dropped, but a new reader sees {seen:?} and a power loss recovers {after_power_loss:?}"
++    );
++}
+diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
+index a94c7f72f..fa35782b3 100644
+--- a/core/mvcc/database/tests.rs
++++ b/core/mvcc/database/tests.rs
+@@ -5378,3 +5378,6 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+         TursoAllocator,
+     )
+ }
++
++#[path = "log_fsync_error_tests.rs"]
++mod log_fsync_error_tests;
