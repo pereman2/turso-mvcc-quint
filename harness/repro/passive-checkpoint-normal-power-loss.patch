@@ -1,0 +1,132 @@
+diff --git a/tests/integration/mvcc/checkpoint.rs b/tests/integration/mvcc/checkpoint.rs
+index 2cf3b1ec9..44180c7e8 100644
+--- a/tests/integration/mvcc/checkpoint.rs
++++ b/tests/integration/mvcc/checkpoint.rs
+@@ -523,6 +523,127 @@ fn mvcc_passive_checkpoint_busy_under_pinned_reader_no_corruption() {
+     );
+ }
+ 
++/// What a reader sees after a power loss that follows a passive checkpoint.
++///
++/// The checkpoint runs under `synchronous=NORMAL` while another connection holds a read
++/// transaction, so its backfill finds the database file pinned and copies no frame. The
++/// power loss keeps only the bytes that an fsync covered. With `commit_fsynced` the row is
++/// committed by a third connection under `synchronous=FULL` first, so its log record is
++/// durable before the checkpoint starts.
++fn rows_after_power_loss_following_passive_checkpoint(
++    sync_mode: &str,
++    pin_reader: bool,
++    commit_fsynced: bool,
++) -> Vec<(i64,)> {
++    use crate::unreliable_io::UnreliableIo;
++    use turso_core::{Database, OpenFlags, PlatformIO};
++    use turso_sqlite::SqliteDialect;
++
++    let db_path =
++        format!("passive-checkpoint-power-loss-{sync_mode}-{pin_reader}-{commit_fsynced}.db");
++    let io = Arc::new(UnreliableIo::new());
++    let opts = DatabaseOpts::new().with_experimental_mvcc_passive_checkpoint(true);
++    let db = Database::open_file_with_flags(
++        io.clone(),
++        &db_path,
++        OpenFlags::default(),
++        opts,
++        None,
++        Arc::new(SqliteDialect),
++    )
++    .unwrap();
++    let connect = || db.connect(ConnectOpts::new(SessionRole::Superuser)).unwrap();
++    let writer = connect();
++    writer.pragma_update("journal_mode", "'mvcc'").unwrap();
++    writer.disable_mvcc_auto_checkpoint().unwrap();
++    writer.execute("CREATE TABLE t(x)").unwrap();
++    writer.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    io.mark_all_durable();
++
++    writer
++        .execute(format!("PRAGMA synchronous={sync_mode}"))
++        .unwrap();
++    let reader = connect();
++    if pin_reader {
++        reader.execute("BEGIN").unwrap();
++        let _: Vec<(i64,)> = reader.exec_rows("SELECT x FROM t");
++    }
++    if commit_fsynced {
++        let durable_writer = connect();
++        durable_writer.execute("PRAGMA synchronous=FULL").unwrap();
++        durable_writer.execute("INSERT INTO t VALUES (42)").unwrap();
++    } else {
++        writer.execute("INSERT INTO t VALUES (42)").unwrap();
++    }
++    let ckpt: Vec<(i64, i64, i64)> = writer.exec_rows("PRAGMA wal_checkpoint(PASSIVE)");
++    eprintln!("wal_checkpoint(PASSIVE) -> {ckpt:?}");
++    eprintln!(
++        "unsynced after checkpoint: wal={} log={}",
++        io.has_unsynced_writes(&format!("{db_path}-wal")),
++        io.has_unsynced_writes(&format!("{db_path}-log")),
++    );
++
++    // Power loss: every write that no fsync covered is gone.
++    let durable = io.durable_files();
++    for (path, bytes) in &durable {
++        eprintln!("durable {path}: {} bytes", bytes.len());
++    }
++    let dir = tempfile::TempDir::new().unwrap();
++    let recovered_path = dir.path().join("recovered.db");
++    for (path, bytes) in &durable {
++        let suffix = &path[db_path.len()..];
++        let target = format!("{}{suffix}", recovered_path.to_str().unwrap());
++        std::fs::write(target, bytes).unwrap();
++    }
++    let recovered_db = Database::open_file_with_flags(
++        Arc::new(PlatformIO::new().unwrap()),
++        recovered_path.to_str().unwrap(),
++        OpenFlags::default(),
++        DatabaseOpts::new().with_experimental_mvcc_passive_checkpoint(true),
++        None,
++        Arc::new(SqliteDialect),
++    )
++    .unwrap();
++    let recovered = recovered_db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    recovered.exec_rows("SELECT x FROM t")
++}
++
++/// Under `synchronous=NORMAL` a commit does not fsync the WAL. A passive checkpoint writes the
++/// committed rows into the WAL. A pinned reader makes its backfill Busy, so no frame is copied
++/// and nothing fsyncs the WAL. The checkpoint still truncates the logical log and fsyncs it.
++/// A power loss then loses a committed row.
++#[test]
++fn passive_checkpoint_under_normal_with_pinned_reader_keeps_committed_row_after_power_loss() {
++    assert_eq!(
++        rows_after_power_loss_following_passive_checkpoint("NORMAL", true, false),
++        vec![(42,)]
++    );
++}
++
++/// The same, but a `synchronous=FULL` commit made the row durable before the checkpoint.
++#[test]
++fn passive_checkpoint_under_normal_with_pinned_reader_keeps_fsynced_row_after_power_loss() {
++    assert_eq!(
++        rows_after_power_loss_following_passive_checkpoint("NORMAL", true, true),
++        vec![(42,)]
++    );
++}
++
++/// Controls: FULL, or no pinned reader, keep the row.
++#[test]
++fn passive_checkpoint_power_loss_controls_keep_committed_row() {
++    assert_eq!(
++        rows_after_power_loss_following_passive_checkpoint("FULL", true, false),
++        vec![(42,)]
++    );
++    assert_eq!(
++        rows_after_power_loss_following_passive_checkpoint("NORMAL", false, false),
++        vec![(42,)]
++    );
++}
++
+ #[turso_macros::test(encryption)]
+ fn test_recovery_checkpoint_then_more_writes() {
+     let mut db = MvccTestDbNoConn::new_maybe_encrypted(encrypted);

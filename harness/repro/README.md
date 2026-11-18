@@ -165,3 +165,63 @@ delete", "write-write conflict commit dependency", "spurious write write
 conflict MVCC", "check_version_conflicts", "mvcc write write conflict" and
 "false conflict BEGIN CONCURRENT delete insert". The nearest issues are #5954,
 #6014 and #6338, with different causes. No duplicate.
+
+## passive-checkpoint-normal-power-loss.patch
+
+The patch applies to turso main at `740300d9d`. It adds three tests to
+`tests/integration/mvcc/checkpoint.rs`, with the shared `UnreliableIo`
+(`durable_files()` is the power-loss image). It changes no engine code. The
+flag `experimental_mvcc_passive_checkpoint` is on and `PRAGMA synchronous=NORMAL`
+is set on the checkpointing connection.
+
+| Test | Expected | Actual on 740300d9d |
+|---|---|---|
+| `passive_checkpoint_under_normal_with_pinned_reader_keeps_committed_row_after_power_loss` | After a power loss the row `42` is still there | The read gives `[]` |
+| `passive_checkpoint_under_normal_with_pinned_reader_keeps_fsynced_row_after_power_loss` | Same, with a `synchronous=FULL` commit of `42` before the checkpoint | The read gives `[]` |
+| `passive_checkpoint_power_loss_controls_keep_committed_row` | `synchronous=FULL` with a pinned reader, and NORMAL with no pinned reader, keep `42` | Passes |
+
+A second connection holds `BEGIN` plus a `SELECT`. The passive backfill then
+copies no frame, so nothing fsyncs the WAL. The checkpoint truncates and fsyncs
+the logical log. The WAL frames with the row stay unsynced and the log is empty.
+In the second test the log record was durable, and the checkpoint still loses
+the row.
+
+```bash
+git -C <turso> checkout 740300d9d
+git -C <turso> apply <this repo>/harness/repro/passive-checkpoint-normal-power-loss.patch
+cd <turso>
+cargo test -p core_tester --test integration_tests passive_checkpoint_ -- --nocapture --test-threads=1
+```
+
+Each of the two failing tests failed in 3 of 3 runs. A probe that fsyncs the WAL
+in the Busy arm before `TruncateLogicalLog` when `sync_mode != Off` makes all
+three pass. The probe covers only the Busy arm and is not a full fix. A pass
+that returns OK with 0 frames copied (the reader mark sits at `nbackfills`,
+`wal.rs:1209-1230`, `core/mvcc/database/checkpoint.rs:3344-3347`) also leaves
+the WAL unsynced.
+
+
+```diff
+--- a/core/mvcc/database/checkpoint.rs
++++ b/core/mvcc/database/checkpoint.rs
+@@ -3320,6 +3320,14 @@ CheckpointStateMachine
+                         self.checkpoint_result =
+                             Some(CheckpointResult::new(max_frame, nbackfills, 0));
+                         self.state = CheckpointState::TruncateLogicalLog;
++                        if self.sync_mode != SyncMode::Off {
++                            if let Some(wal) = self.pager.wal.as_ref() {
++                                let c = wal.sync(crate::io::FileSyncType::Fsync)?;
++                                if !c.succeeded() {
++                                    return Ok(TransitionResult::Io(IOCompletions(c)));
++                                }
++                            }
++                        }
+                         Ok(TransitionResult::Continue)
+                     }
+                     Err(e) => Err(*e),
+```
+
+Duplicate search, `gh issue list -R tursodatabase/turso --state all --search`
+on 2026-11-18: "synchronous NORMAL", "power loss", "logical log truncate" and
+"passive checkpoint busy". The nearest issues are #7952 (closed, the backfill
+fsync that this path skips), #11507 and #12005 (other causes). No duplicate.
