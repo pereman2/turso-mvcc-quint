@@ -302,3 +302,21 @@ says otherwise.
 - 2026-11-17, recovery spec, leads `idea2` and `idea2Passive`. Reproduced on
   turso main with an I/O fault. This is the known bug of open PR #11835, so
   it is in finding 5, not a new report.
+- 2026-11-18, 11:19 to 15:00 CET, long hunt from peristocles with the Mac
+  over ssh, at one heavy job at a time in the shared slots. Engine: turso
+  main `9cf2de2d8`, with `turso-hooks.patch` and `mbt_tests` ported to main
+  in the Mac clone only (`checkpoint_state_machine.rs` is now
+  `checkpoint.rs`, and `ConnectOpts::new` takes a `SessionRole`). The
+  replay suite gives 18 passed, 0 failed. Pass 1 ran no job, because the
+  gap threads held both slots for 80 minutes. Pass 2: 600 `mbtBlockingPin`
+  and 600 `mbtBlocking` traces of 120 steps, and 5 witness traces of a
+  checkpoint on the connection of an active reader (`mbt` with
+  `CheckpointOnReaderConnection = "keepsMark"`, owner fix off), replay with
+  0 refused and 0 failed. `quint run` of the row main configuration (2
+  seeds) and the sequence main configuration (1 seed), 200,000 samples of
+  80 steps each, finds no violation. Pass 3: 400 index and 400 group
+  commit traces replay with 0 refused and 0 failed. `quint run`, 100,000
+  samples of 80 steps, of the group commit, index and recovery main
+  configurations (2 seeds each) and of the schema main configuration and
+  `truncateFlagOn` (1 seed each), finds no violation. No TLC or Apalache
+  run. Row 25a is now reproduced (above). No other divergence.
