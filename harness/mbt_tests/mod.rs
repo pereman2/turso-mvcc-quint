@@ -88,6 +88,15 @@ enum Failure {
     CommittedNotDurable,
     /// A process crash now replays a rolled-back transaction.
     RolledBackReplayed,
+    /// A reader scan returned other rows than the spec `saw`.
+    ReaderRows,
+    /// A reader COMMIT ended in another way than the spec (done or aborted).
+    ReaderEnd,
+    /// A finished reader saw a row that recovery loses.
+    ReadNotDurable,
+    /// A finished reader saw a transaction as rolled back, and recovery
+    /// replays it.
+    ReadAbortReplayed,
     /// A scan of sqlite_schema returned other tables than the spec oracle.
     CatalogRead,
     /// GC kept a version that the spec dropped.

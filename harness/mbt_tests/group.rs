@@ -4,6 +4,12 @@
 //! `ShadowIo`, which keeps the bytes of each file as of its last fsync, so a
 //! probe can open the files as a power loss leaves them.
 //!
+//! Spec reader r is one more connection. `Read` runs `BEGIN CONCURRENT` and
+//! `SELECT pk FROM t`. `ReaderEnd` steps its `COMMIT`, which waits for the
+//! commit dependencies. A driver made with `new_direct` turns group commit
+//! off, so every COMMIT takes the non-group path (`DirectLock`, `DirectWrite`,
+//! `DirectMarkWritten`).
+//!
 //! The engine runs some spec actions of one commit without a point where the
 //! driver can stop it. The driver steps the engine to its next stop and then
 //! consumes the spec actions of the same transaction up to the matching spec
@@ -243,6 +249,21 @@ pub(super) struct Promises {
     pub(super) committed_durable: bool,
     /// A process crash replays no rolled-back transaction.
     pub(super) no_rolled_back_replay: bool,
+    /// A finished reader saw only FULL rows that a power loss keeps.
+    pub(super) reads_survive_power_loss: bool,
+    /// A finished reader saw only rows that a process crash keeps.
+    pub(super) reads_survive_crash: bool,
+    /// A transaction that a finished reader saw as rolled back stays out of
+    /// recovery.
+    pub(super) recovery_keeps_read_aborts: bool,
+}
+
+/// A spec reader: its connection, its COMMIT statement and the primary
+/// keys that its scan returned.
+struct ReaderConn {
+    _conn: Arc<Connection>,
+    commit: crate::Statement,
+    rows: BTreeSet<i64>,
 }
 
 pub(super) struct GroupDriver {
@@ -251,6 +272,9 @@ pub(super) struct GroupDriver {
     db: Arc<Database>,
     reader: Arc<Connection>,
     writers: BTreeMap<String, Writer>,
+    readers: BTreeMap<String, ReaderConn>,
+    /// Group commit is off: every COMMIT takes the non-group path.
+    direct: bool,
     promises: Promises,
     /// The driver holds the pager commit lock while the spec lock is free, so
     /// that a COMMIT parks where the spec has it wait.
@@ -266,6 +290,16 @@ const FULL_TXS: [&str; 2] = ["a", "c"];
 
 impl GroupDriver {
     pub(super) fn new(promises: Promises) -> Self {
+        Self::open(promises, false)
+    }
+
+    /// A driver with `PRAGMA mvcc_group_commit = off`, for traces of a
+    /// configuration where every transaction is in DirectTxs.
+    pub(super) fn new_direct(promises: Promises) -> Self {
+        Self::open(promises, true)
+    }
+
+    fn open(promises: Promises, direct: bool) -> Self {
         let io = Arc::new(ShadowIo::default());
         let db_path = format!("group-{}.db", NEXT_DB.fetch_add(1, Ordering::Relaxed));
         let db = Database::open_file(io.clone(), &db_path, Arc::new(EngineDialect)).unwrap();
@@ -274,7 +308,11 @@ impl GroupDriver {
             "PRAGMA journal_mode = 'mvcc'",
             "CREATE TABLE t(pk INTEGER PRIMARY KEY, v INTEGER)",
             "PRAGMA mvcc_checkpoint_threshold = -1",
-            "PRAGMA mvcc_group_commit = on",
+            if direct {
+                "PRAGMA mvcc_group_commit = off"
+            } else {
+                "PRAGMA mvcc_group_commit = on"
+            },
         ] {
             setup.execute(sql).unwrap();
         }
@@ -286,6 +324,8 @@ impl GroupDriver {
             db,
             reader,
             writers: BTreeMap::new(),
+            readers: BTreeMap::new(),
+            direct,
             promises,
             gate: false,
             pending: None,
@@ -356,6 +396,7 @@ impl GroupDriver {
     fn step_commit(&mut self, t: &str) -> std::result::Result<EngineStop, Stop> {
         let io = self.io.clone();
         let db = self.db.clone();
+        let direct = self.direct;
         let w = self.writers.get_mut(t).unwrap();
         let commit = w.commit.as_mut().expect("the COMMIT statement was dropped");
         w.stops.take();
@@ -369,6 +410,11 @@ impl GroupDriver {
                 }
                 Ok(StepResult::Yield) => {
                     if let Some(stop) = w.stops.take() {
+                        // The non-group path has no stop at the issue of a
+                        // record. Only the mark of its own record stops.
+                        if direct && stop == EngineStop::Issued {
+                            continue;
+                        }
                         return Ok(stop);
                     }
                     ios = 0;
@@ -409,7 +455,7 @@ impl GroupDriver {
     }
 
     /// The engine stop that matches the spec state of `t` after `step`.
-    fn spec_stop(step: &Step, t: &str) -> Option<EngineStop> {
+    fn spec_stop(step: &Step, t: &str, direct: bool) -> Option<EngineStop> {
         let x = step.var("txs").get_str(t);
         let owner = |ticket: i64| -> String {
             step.var("recs")
@@ -423,7 +469,10 @@ impl GroupDriver {
             "done" => Some(EngineStop::Done),
             // The engine runs Drop and DropFinish in one cleanup.
             "dropping" | "dropped" => Some(EngineStop::Dropped),
-            "issued" if owner(x.field("writing").int()) != t => Some(EngineStop::Issued),
+            "issued" if !direct && owner(x.field("writing").int()) != t => {
+                Some(EngineStop::Issued)
+            }
+            _ if step.action == "DirectMarkWritten" => Some(EngineStop::MarkedOwn),
             _ if step.action == "MarkWritten"
                 && step.var("log").items().last().map(|f| f.field("tx").str()) == Some(t) =>
             {
@@ -435,8 +484,13 @@ impl GroupDriver {
 
     /// Moves `pending` forward with a spec step of its transaction. Returns
     /// true when the spec reached the engine stop.
-    fn consume(step: &Step, t: &str, stop: EngineStop) -> std::result::Result<bool, Stop> {
-        match Self::spec_stop(step, t) {
+    fn consume(
+        step: &Step,
+        t: &str,
+        stop: EngineStop,
+        direct: bool,
+    ) -> std::result::Result<bool, Stop> {
+        match Self::spec_stop(step, t, direct) {
             Some(s) if s == stop => Ok(true),
             // The engine passes AwaitGroupCommit without a park when the lock
             // is free, so a spec "await" is not a stop then.
@@ -589,6 +643,138 @@ impl GroupDriver {
                 ),
             );
         }
+        self.check_readers(step, &crash_rows, &power_rows)
+    }
+}
+
+impl GroupDriver {
+    fn run_reader(&mut self, step: &Step) -> StepOutcome {
+        let r = step.pick("r").str().to_string();
+        let spec = step.var("rd").get_str(&r);
+        if step.action == "Read" {
+            let conn = self.db.connect(ConnectOpts::new()).unwrap();
+            conn.execute("BEGIN CONCURRENT").unwrap();
+            let rows: BTreeSet<i64> = query_rows(&conn, "SELECT pk FROM t")
+                .unwrap()
+                .iter()
+                .map(|row| row[0].as_int().expect("pk is an integer"))
+                .collect();
+            let expected: BTreeSet<i64> = spec
+                .field("saw")
+                .items()
+                .iter()
+                .map(|t| self.writers[t.str()].pk)
+                .collect();
+            if rows != expected {
+                return fail(
+                    Failure::ReaderRows,
+                    format!("reader {r} scans {rows:?}, the spec shows {expected:?}"),
+                );
+            }
+            let commit = conn.prepare("COMMIT").unwrap();
+            self.readers.insert(
+                r,
+                ReaderConn {
+                    _conn: conn,
+                    commit,
+                    rows,
+                },
+            );
+            return Ok(());
+        }
+        let io = self.io.clone();
+        let reader = self.readers.get_mut(&r).expect("ReaderEnd before Read");
+        let mut outcome = None;
+        for _ in 0..YIELD_WAIT {
+            match reader.commit.step() {
+                Ok(StepResult::Done) => {
+                    outcome = Some("done");
+                    break;
+                }
+                Ok(StepResult::Yield) => {}
+                Ok(StepResult::IO) => io.step().unwrap(),
+                Ok(other) => panic!("reader COMMIT step gave {other:?}"),
+                Err(_) => {
+                    outcome = Some("aborted");
+                    break;
+                }
+            }
+        }
+        let spec_pc = spec.field("pc").str();
+        match outcome {
+            Some(got) if got == spec_pc => Ok(()),
+            Some(got) => fail(
+                Failure::ReaderEnd,
+                format!("reader {r} COMMIT ends as {got}, the spec says {spec_pc}"),
+            ),
+            None => fail(
+                Failure::ReaderEnd,
+                format!("reader {r} COMMIT still waits, the spec says {spec_pc}"),
+            ),
+        }
+    }
+
+    fn check_readers(
+        &self,
+        step: &Step,
+        crash_rows: &BTreeSet<i64>,
+        power_rows: &BTreeSet<i64>,
+    ) -> StepOutcome {
+        let Some(rd) = step.vars.get("rd") else {
+            return Ok(());
+        };
+        let full: BTreeSet<i64> = self
+            .writers
+            .values()
+            .filter(|w| w.full)
+            .map(|w| w.pk)
+            .collect();
+        for (name, x) in rd.entries() {
+            if x.field("pc").str() != "done" {
+                continue;
+            }
+            let name = name.str();
+            let rows = &self.readers[name].rows;
+            let gone: BTreeSet<i64> = x
+                .field("sawGone")
+                .items()
+                .iter()
+                .map(|t| self.writers[t.str()].pk)
+                .collect();
+            let lost: BTreeSet<_> = rows
+                .intersection(&full)
+                .filter(|pk| !power_rows.contains(pk))
+                .collect();
+            if self.promises.reads_survive_power_loss && !lost.is_empty() {
+                return fail(
+                    Failure::ReadNotDurable,
+                    format!(
+                        "reader {name} finished with FULL rows {lost:?}, \
+                         a power loss recovers {power_rows:?}"
+                    ),
+                );
+            }
+            if self.promises.reads_survive_crash && !rows.is_subset(crash_rows) {
+                return fail(
+                    Failure::ReadNotDurable,
+                    format!(
+                        "reader {name} finished with rows {rows:?}, \
+                         a process crash recovers {crash_rows:?}"
+                    ),
+                );
+            }
+            if self.promises.recovery_keeps_read_aborts
+                && !(gone.is_disjoint(crash_rows) && gone.is_disjoint(power_rows))
+            {
+                return fail(
+                    Failure::ReadAbortReplayed,
+                    format!(
+                        "reader {name} saw {gone:?} rolled back, a process crash recovers \
+                         {crash_rows:?}, a power loss recovers {power_rows:?}"
+                    ),
+                );
+            }
+        }
         Ok(())
     }
 }
@@ -607,6 +793,16 @@ impl Driver for GroupDriver {
         if self.writers.is_empty() {
             self.start_writers(step);
         }
+        if matches!(step.action.as_str(), "Read" | "ReaderEnd") {
+            if let Some((p, stop)) = &self.pending {
+                return refuse(format!(
+                    "{} runs while the engine runs {p} to {stop:?} in one step",
+                    step.action
+                ));
+            }
+            self.run_reader(step)?;
+            return self.check(step);
+        }
         let t = step.pick("t").str().to_string();
         if let Some((p, stop)) = self.pending.clone() {
             if p != t {
@@ -618,7 +814,7 @@ impl Driver for GroupDriver {
             if step.action == "Drop" {
                 return refuse(format!("{t} drops inside an engine step"));
             }
-            if !Self::consume(step, &t, stop)? {
+            if !Self::consume(step, &t, stop, self.direct)? {
                 return Ok(());
             }
             self.pending = None;
@@ -628,7 +824,7 @@ impl Driver for GroupDriver {
                 "Drop" => {
                     let commit = self.writers.get_mut(&t).unwrap().commit.take();
                     drop(commit);
-                    if !Self::consume(step, &t, EngineStop::Dropped)? {
+                    if !Self::consume(step, &t, EngineStop::Dropped, self.direct)? {
                         self.pending = Some((t, EngineStop::Dropped));
                         return Ok(());
                     }
@@ -637,11 +833,11 @@ impl Driver for GroupDriver {
                 // The parked engine commit runs this step together with End.
                 "Await" if x.field("pc").str() == "end" && !x.field("led").bool() => {}
                 action => {
-                    if action == "Await" && step.var("lock").str() == t {
+                    if matches!(action, "Await" | "DirectLock") && step.var("lock").str() == t {
                         self.release_gate();
                     }
                     let stop = self.step_commit(&t)?;
-                    if !Self::consume(step, &t, stop)? {
+                    if !Self::consume(step, &t, stop, self.direct)? {
                         self.pending = Some((t, stop));
                         return Ok(());
                     }
@@ -739,7 +935,7 @@ fn trace_that_ends_inside_an_engine_step_is_refused() {
 fn dropped_commit_is_committed_before_fsync() {
     let mut driver = GroupDriver::new(Promises {
         committed_durable: true,
-        no_rolled_back_replay: false,
+        ..Promises::default()
     });
     let replayed = replay(
         "group-committed-not-durable",
@@ -758,8 +954,8 @@ fn dropped_commit_is_committed_before_fsync() {
 #[test]
 fn rolled_back_waiter_is_replayed_after_crash() {
     let mut driver = GroupDriver::new(Promises {
-        committed_durable: false,
         no_rolled_back_replay: true,
+        ..Promises::default()
     });
     let replayed = replay(
         "group-rolled-back-replayed",
@@ -771,6 +967,67 @@ fn rolled_back_waiter_is_replayed_after_crash() {
         &mut driver,
     );
     assert_eq!(replayed, Replay::Done);
+}
+
+/// Traces of the mbtDirect module: every transaction is on the non-group path
+/// and one reader reads.
+const GENERATED_DIRECT_TRACES: &[(&str, &str)] = &[
+    ("group-direct-0", include_str!("traces/group-direct-0.itf.json")),
+    ("group-direct-76", include_str!("traces/group-direct-76.itf.json")),
+];
+
+#[test]
+fn generated_direct_traces_conform() {
+    let mut covered = BTreeSet::new();
+    for (name, trace) in GENERATED_DIRECT_TRACES {
+        let mut driver = GroupDriver::new_direct(Promises {
+            reads_survive_crash: true,
+            ..Promises::default()
+        });
+        assert_eq!(
+            replay(name, trace, Expect::Conforms, &mut driver),
+            Replay::Done,
+            "a generated direct trace was refused"
+        );
+        covered.extend(seen_events(trace));
+    }
+    assert!(covered.contains("directDropCommit"));
+}
+
+/// `directDropReadUnsynced` on the engine: a FULL commit on the non-group path
+/// drops after its record is written. A reader that depended on it finishes,
+/// and a power loss loses the row that it saw.
+#[test]
+fn reader_sees_dropped_direct_commit_before_fsync() {
+    let mut driver = GroupDriver::new_direct(Promises {
+        reads_survive_power_loss: true,
+        ..Promises::default()
+    });
+    let replayed = replay(
+        "group-direct-read-unsynced",
+        include_str!("traces/group-direct-read-unsynced.itf.json"),
+        Expect::Violation {
+            step: 6,
+            kind: Failure::ReadNotDurable,
+        },
+        &mut driver,
+    );
+    assert_eq!(replayed, Replay::Done);
+}
+
+/// `directDropResurrects` drops a direct commit after the write was issued and
+/// before it was marked. The engine writes and marks the frame in one step, so
+/// the driver refuses the trace. Not verified on the engine.
+#[test]
+fn direct_resurrect_trace_is_refused() {
+    let mut driver = GroupDriver::new_direct(Promises::default());
+    let replayed = replay(
+        "group-direct-resurrects",
+        include_str!("traces/group-direct-resurrects.itf.json"),
+        Expect::Conforms,
+        &mut driver,
+    );
+    assert_eq!(replayed, Replay::Refused);
 }
 
 #[test]
@@ -791,7 +1048,14 @@ fn group_traces_from_folder() {
         let trace = std::fs::read_to_string(path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let result = std::panic::catch_unwind(|| {
-            let mut driver = GroupDriver::new(Promises::default());
+            let mut driver = if trace.contains("DirectLock") {
+                GroupDriver::new_direct(Promises {
+                    reads_survive_crash: true,
+                    ..Promises::default()
+                })
+            } else {
+                GroupDriver::new(Promises::default())
+            };
             replay(&name, &trace, Expect::Conforms, &mut driver)
         });
         match result {
@@ -809,4 +1073,54 @@ fn group_traces_from_folder() {
         paths.len()
     );
     assert_eq!(failed, 0);
+}
+
+/// Replays the bug traces of the direct variants with the promise that each
+/// one breaks. `directDropReadUnsynced` must fail with `ReadNotDurable`.
+/// `directDropResurrects` must be refused. A missing trace fails the test.
+#[test]
+#[ignore]
+fn direct_bug_traces_from_folder() {
+    let folder = std::env::var("MBT_TRACES").expect("set MBT_TRACES to a folder of traces");
+    let read = |variant: &str| {
+        let path = format!("{folder}/MvccGroupCommit-{variant}.itf.json");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("{variant}: no trace at {path}"))
+    };
+
+    let trace = read("directDropReadUnsynced");
+    let result = std::panic::catch_unwind(|| {
+        let mut driver = GroupDriver::new_direct(Promises {
+            reads_survive_power_loss: true,
+            ..Promises::default()
+        });
+        replay(
+            "directDropReadUnsynced",
+            &trace,
+            Expect::Conforms,
+            &mut driver,
+        )
+    });
+    let payload = result.expect_err("directDropReadUnsynced must fail, but it conformed");
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        message.contains("ReadNotDurable"),
+        "directDropReadUnsynced must fail with ReadNotDurable: {message}"
+    );
+
+    let trace = read("directDropResurrects");
+    let mut driver = GroupDriver::new_direct(Promises {
+        recovery_keeps_read_aborts: true,
+        ..Promises::default()
+    });
+    let replayed = replay(
+        "directDropResurrects",
+        &trace,
+        Expect::Conforms,
+        &mut driver,
+    );
+    assert_eq!(replayed, Replay::Refused, "directDropResurrects is refused");
 }
