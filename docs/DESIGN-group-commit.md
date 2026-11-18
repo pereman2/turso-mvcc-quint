@@ -24,7 +24,11 @@ The spec checks these promises:
 - A transaction that rolled back never comes back after a crash
   (`RecoveryNoRolledBack`).
 - When a FULL transaction becomes `Committed`, its frame is on disk
-  (`CommittedDurable`). New readers see a transaction from `Committed` on.
+  (`CommittedDurable`). This promise is too weak for the readers. A
+  speculative reader sees a `Preparing` row before `Committed`, and only the
+  wait of `ReaderEnd` covers that window. A reader that begins after
+  `Committed` reads the row with no wait. So every break of `CommittedDurable`
+  is visible to readers. See "The direct path and readers".
 
 The recovery spec assumes one commit in flight (`MvccRecovery.qnt:68`). It
 does not show that the batch, the tickets and the retry path keep these
@@ -226,6 +230,19 @@ Each reachability check must fail. They show that these states occur:
 | `noRetryBlocksLead` | no lead while a retry is pending (`group_commit.rs:165`) | Not shown needed at these bounds |
 | `noHoleGuards` | all three hole guards | `AckDurable` fails: a later ticket marks the retry ticket durable, and its waiter returns success with no frame |
 
+Direct path and readers (one reader, `MaxTicket = 2`, TLC):
+
+| Variant | Setting | Result |
+|---|---|---|
+| `direct` | two direct commits, `a` FULL, with drops | `ReadsSurviveCrash` and the main invariants hold (1,004 states) |
+| `directNoDrop` | as `direct`, no drops | All three reader invariants hold (159 states). A finished reader saw only durable rows of FULL commits. `RecoveryKeepsReadAborts` is vacuous here, because no transaction rolls back |
+| `directNoDepWait` | one FULL direct commit, no drops, `GuardDepWait` false | `ReadsSurvivePowerLoss` fails (35 states). The reader tests the dependency wait |
+| `directNoDepWaitDurable` | as `directNoDepWait` | `CommittedDurable` holds (35 states). So the failure above comes from the reader |
+| `directDropReadUnsynced` | one FULL direct commit, with drops | `ReadsSurvivePowerLoss` fails (66 states): a dropped commit notifies before its fsync |
+| `directDropResurrects` | one NORMAL direct commit, with drops | `RecoveryKeepsReadAborts` fails (58 states): the rollback leaves the frame in the file |
+| `directFixSyncOnDrop` | as `directDropReadUnsynced` with `FixSyncOnDrop` | `ReadsSurvivePowerLoss` holds (59 states). The fix covers the client drop and the test yield. It does not cover the fsync error of `FINDINGS.md` row 30 |
+| `mixed` | group `a`, direct `b`, both FULL, with drops | The main invariants and `ReadsSurviveCrash` hold (1,962 states) |
+
 With any one of the three hole guards turned off, the other two still pass
 at these bounds. With all three off, `AckDurable` fails. No run keeps only
 one guard. This is not a reason to delete any of them.
@@ -272,21 +289,97 @@ CONCURRENT`, one INSERT and a COMMIT statement that the driver steps.
   bug variant. Their replay must fail at the same step with
   `CommittedNotDurable` and `RolledBackReplayed`.
 
+The direct path and the readers use the same driver.
+
+- `GroupDriver::new_direct` sets `PRAGMA mvcc_group_commit = off`. The
+  `mbtDirect` configuration has every transaction in `DirectTxs`, so it
+  matches that setting. `DirectLock` releases the gate and steps the COMMIT.
+  The engine runs the lock, the write and the mark in one step and stops at
+  `LogRecordMarkedWritten`. The spec reaches that stop with
+  `DirectMarkWritten`. The `LogicalLogWriteIssued` yield is not a stop on this
+  path.
+- A reader is one more connection. `Read` runs `BEGIN CONCURRENT` and
+  `SELECT pk FROM t`, and the driver compares the rows with `saw`. It leaves
+  out a transaction that has not started its commit, because the engine shows
+  no row of it. `ReaderEnd` steps the reader COMMIT, which must end as
+  `done` or `aborted` as in the spec.
+- After each step, the driver checks the three reader invariants on the
+  engine, with the rows that the reader scanned.
+- 100 traces of `mbtDirect` replay and conform. The traces that are committed
+  are `group-direct-0` and `group-direct-76`. The bug trace of
+  `directDropReadUnsynced` fails at its `ReaderEnd` with `ReadNotDurable`:
+  a reader finished with row 1 and a power loss recovers no row. The bug
+  trace of `directDropResurrects` is refused. It drops the COMMIT between the
+  issue of the write and its mark, and the engine does that in one step. So
+  the resurrect path of the direct case is not verified on the engine.
+- The group and direct tests pass 3 of 3 runs.
+
 A replay that passes shows that the engine can follow the paths of the
 model. It does not test paths that the model lacks.
+
+## The direct path and readers
+
+If its transaction is exclusive, or group commit is off, a COMMIT takes the
+non-group path (`mod.rs:3404-3405`). Every write in `TransactionMode::Write` is
+exclusive (`execute.rs:4385`). So a plain autocommit INSERT takes this path.
+Only `BEGIN CONCURRENT` writers use group commit.
+
+The spec models this path for the transactions of `DirectTxs`. It has three
+steps. `DirectLock` takes the lock (`mod.rs:3418`). `DirectWrite` is `log_tx`
+(`mod.rs:3498`). `DirectMarkWritten` marks the record (`mod.rs:3523`). It has
+no ticket, so `grp` does not change. `Sync`, `End`, `CommitEnd`, `Drop` and `DropFinish` serve both paths.
+An fsync error is the `Drop` at pc "sync". The error leaves `SyncLogicalLog`
+(`mod.rs:3546`), the statement aborts, and abort runs the same cleanup.
+
+A reader is one atomic `Read` and one `ReaderEnd`. `Read` sees the
+transactions that are `Committed` or `Preparing`. It depends on the
+`Preparing` ones (`mod.rs:11057`). The engine shows a `Preparing` version
+only to a reader whose `begin_ts` is above the writer `end_ts`. The commit sets
+`end_ts` when it starts (`mod.rs:11057-11068`). So `Read` counts a `Preparing`
+transaction only once its commit started: its pc is not "active", or it has a ticket. A group retry goes back to "active" with its ticket and keeps its `end_ts` (`mod.rs:1980-2016`). `ReaderEnd` waits until each
+dependency has its `notified` flag (`mod.rs:3343`). The guard `GuardDepWait`
+turns that wait on. If a dependency is `RolledBack`, the reader aborts
+(`mod.rs:3347`). A FULL commit sets `notified` after its fsync. So a reader
+that finishes saw only durable rows of FULL commits. A NORMAL commit notifies
+with no fsync. A dropped commit sets `notified` at once (`mod.rs:7342`),
+before any fsync.
+
+Three invariants link readers and recovery. `recovered(power)` is the set of
+transactions in `disk` (power loss) or in the file (process crash).
+
+- `ReadsSurvivePowerLoss`: a finished reader saw only FULL transactions that a
+  power loss keeps.
+- `ReadsSurviveCrash`: a finished reader saw only transactions that a process
+  crash keeps.
+- `RecoveryKeepsReadAborts`: a transaction that a finished reader saw as
+  rolled back is not in `recovered`.
+
+`FixSyncOnDrop` is a proposed fix. The cleanup fsyncs a FULL record before it
+marks the transaction `Committed`. The fix covers the client drop and the test
+yield. It does not cover the fsync error of `FINDINGS.md` row 30. On Linux a
+failed fsync can mark dirty pages clean, and a retry can then report success
+with the frame not on disk. This is why `pager.rs:4788-4796` panics. The model
+does not cover that. A real fsync error can lose pages and break the CRC
+chain. So for the error case, a later fsync that covers the frame
+(`coveredLater`) is optimistic.
+
+Results are in `MODEL-GAPS.md`, gap 10. The model leaves out a write that
+completes after the COMMIT returned IO. The resurrect path of the direct case
+needs it, because the engine writes and marks the frame in one step.
 
 ## Not modeled
 
 The spec leaves out these parts:
 
-- the non-group path (group commit off, or an exclusive transaction)
-- I/O errors on write or fsync, and a write that completes after its
-  issue. After a drop, such a write can land over the next frame at the same
+- I/O errors on write, and the effect of an fsync error on the disk. The
+  model has the fsync error only as the `Drop` at pc "sync".
+- a write that completes after its issue. After a drop, such a write can land over the next frame at the same
   offset (`FINDINGS.md` row 23)
 - the checkpoint, with its log fsync and its log truncate
 - the log header
-- readers and commit dependencies. `finish_abandoned_group_waiter` removes
-  the transaction without `notify_committed_dependents` (`mod.rs:1949`). A
-  reader that read it speculatively is not checked.
+- a reader that reads a row while a commit is in flight, as more than one
+  atomic step. `finish_abandoned_group_waiter` removes the transaction
+  without `notify_committed_dependents` (`mod.rs:1949`). A reader that read it
+  speculatively waits for ever in the model. Not verified on the engine.
 - a lost wakeup in `park` (`group_commit.rs:105`). The spec has no liveness
   check.
