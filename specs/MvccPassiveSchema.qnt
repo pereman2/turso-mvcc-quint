@@ -54,6 +54,15 @@
  *            #8094). Each object is one row of sqlite_schema. GC drops the
  *            whole chain of a row in one step. A scan is one atomic step.
  *            The catalog configurations keep Alters off.
+ *   SyncObjectMap  each row commit records the object map of its logical
+ *            log frame: the name that the map gives to the table id of the
+ *            row record (populate_portable_changes, mod.rs:2781). A sync
+ *            client keys a table by the absolute value of its rootpage
+ *            column (read_logical_replay_table_map). The sync
+ *            configurations have no ALTER and no indexes, and a row commit
+ *            has one data record. They turn CatalogReads on, because the
+ *            last lookup of the map reads the sqlite_schema versions that
+ *            catalog GC drops.
  *
  *   Mode     "truncateFlagOn": each explicit pass is a TRUNCATE checkpoint
  *            with the passive flag on. Its publish runs in four steps that
@@ -105,6 +114,7 @@ module MvccPassiveSchema {
                                 // The auto-checkpoint is passive in both (mod.rs:3700-3708).
   const CheckpointOwnerReaders: bool // a checkpoint can run on the connection of an open reader
   const GcSamplesFirst: bool    // GC samples lwm and the floor, then applies the rules per chain
+  const SyncObjectMap: bool     // true: each row commit records its object map (portable changes).
 
   // Special cases of the code today. true in the main configuration.
   const GuardMatCheck: bool          // is_btree_readable_at: materialized_at <= read_mark
@@ -140,6 +150,9 @@ module MvccPassiveSchema {
   const FixAlterRecovery: bool   // recovery maps the temporary id of a replayed schema row
                                  // update to the table's page (needs FixPersistIds)
   const FixRefuseCheckpointOwner: bool // a checkpoint refuses a connection with an open snapshot
+  const FixPermanentLogId: bool  // a row record keeps the table's permanent id, and core writes
+                                 // that id into the object map (SIMPLIFY.md step 3, needs
+                                 // FixPersistIds)
 
   pure val Inf = 1000   // "no end timestamp", "no reader"
   pure val None = -1    // "no visible version"
@@ -207,6 +220,10 @@ module MvccPassiveSchema {
   var ins: str -> Ins            // ins[o]: [ts, id] of the row insert and its log record id.
   var scat: str -> SCat          // scat[o]: the version store chain of the sqlite_schema row of o.
                                  // An index row comes with the insert of its table row.
+  var omap: str -> str           // omap[o]: with SyncObjectMap, the name that the object map of
+                                 // the commit of o's row gives to the table id of its record.
+                                 // "" = not recorded, "-" = no name (the commit fails),
+                                 // "?" = more than one name.
   var bind: str -> Bind          // table_id_to_rootpage: bind[o] is the RootEntry of tid[o].
   var wal: List[Image]           // WAL frames. Frame i is wal[i - 1].
   var nBackfill: int             // WAL frames 1..nBackfill are in the database file.
@@ -305,6 +322,8 @@ module MvccPassiveSchema {
   action Init = all {
     // The catalog parts do not model ALTER. With both on, no state exists.
     not(CatalogReads and Alters),
+    // The sync parts do not model ALTER or index rows.
+    not(SyncObjectMap and (Alters or Indexes != Set())),
     clock' = 0,
     lastCommitted' = 0,
     cat' = Objs.mapBy(o => NoCat),
@@ -321,6 +340,7 @@ module MvccPassiveSchema {
     chain' = Objs.mapBy(o => Set()),
     ins' = Objs.mapBy(o => NoIns),
     scat' = Objs.mapBy(o => NoSCat),
+    omap' = Objs.mapBy(o => ""),
     bind' = Objs.mapBy(o => NoBind),
     wal' = List(),
     nBackfill' = 0,
@@ -344,7 +364,7 @@ module MvccPassiveSchema {
   }
 
   // Keeps the row variables as they are.
-  action UnchangedRowVars = all { chain' = chain, ins' = ins, scat' = scat }
+  action UnchangedRowVars = all { chain' = chain, ins' = ins, scat' = scat, omap' = omap }
 
   // Keeps the store variables as they are.
   action UnchangedStoreVars = all {
@@ -395,7 +415,7 @@ module MvccPassiveSchema {
     bind' = if (kind == "create") bind.set(o, { ...NoBind, in: true }) else bind,
     clock' = clock, lastCommitted' = lastCommitted, cookie' = cookie,
     pubCookie' = pubCookie, gen' = gen, pub' = pub, droppedRoots' = droppedRoots,
-    ddlLog' = ddlLog, chain' = chain, ins' = ins,
+    ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap,
     // The statement writes a version of the sqlite_schema row with a TxID,
     // and the stamp goes back to none (mod.rs:10989-11002). A chain that GC
     // dropped gets a tombstone for the B-tree row (mod.rs:5759-5809).
@@ -424,7 +444,7 @@ module MvccPassiveSchema {
                else { ...x, a: ts }),
       lastCommitted' = lastCommitted, cookie' = cookie, pubCookie' = pubCookie,
       gen' = gen, pub' = pub, droppedRoots' = droppedRoots, nextId' = nextId, tid' = tid,
-      ddlLog' = ddlLog, chain' = chain, ins' = ins,
+      ddlLog' = ddlLog, chain' = chain, ins' = ins, omap' = omap,
       // The commit rewrites the TxID of its version, which resets the stamp.
       scat' = if (CatalogReads) scat.setBy(ddl.o, x => { ...x, mat: 0 }) else scat,
       UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
@@ -465,8 +485,70 @@ module MvccPassiveSchema {
   // Writers
 
   // canonical_log_id: -root when the table has a root page, else its id.
+  // With FixPermanentLogId the record keeps the permanent id.
   def LogId(o: str): int =
-    if (bind.get(o).in and bind.get(o).root > 0) -bind.get(o).root else tid.get(o)
+    if (FixPermanentLogId) tid.get(o)
+    else if (bind.get(o).in and bind.get(o).root > 0) -bind.get(o).root
+    else tid.get(o)
+
+  pure def Abs(n: int): int = if (n < 0) -n else n
+
+  // The rootpage column of the current sqlite_schema version of table o:
+  // its temporary id until the publish patches in its page
+  // (publish_checkpointed_schema_roots). The sync configurations have no
+  // ALTER, so the row has one version.
+  def RootCol(o: str): int =
+    if (bind.get(o).in and bind.get(o).root > 0) bind.get(o).root else tid.get(o)
+
+  // A table whose CREATE committed and whose DROP did not.
+  def LiveTable(o: str): bool = and {
+    not(Indexes.contains(o)), cat.get(o).c != 0, Resolved(cat.get(o).c),
+    not(cat.get(o).d != Inf and Resolved(cat.get(o).d)),
+  }
+
+  // table_name_for_rootpage (mod.rs:679, mod.rs:662): the connection schema,
+  // then the shared schema, each first by rootpage == r and then by
+  // rootpage == -r. The model has one schema for both, the shared one.
+  def SchemaNames(r: int): Set[str] = {
+    val tables = Objs.filter(y => not(Indexes.contains(y)))
+    val exact = tables.filter(y => pub.get(y) == r)
+    if (exact != Set()) exact else tables.filter(y => pub.get(y) == -r)
+  }
+
+  // table_name_for_rootpage_in_mvcc_schema (mod.rs:692): the sqlite_schema
+  // versions with no end whose rootpage is r or -r. A chain that catalog GC
+  // dropped has no version (the row is only in the B-tree).
+  def CatNames(r: int): Set[str] =
+    Objs.filter(y => and {
+      not(Indexes.contains(y)), cat.get(y).c != 0, cat.get(y).d == Inf,
+      not(scat.get(y).gone),
+      RootCol(y) == r or RootCol(y) == -r,
+    })
+
+  def NamesFor(r: int): Set[str] = if (SchemaNames(r) != Set()) SchemaNames(r) else CatNames(r)
+
+  // populate_portable_changes (mod.rs:2781-3013) for a commit whose one
+  // data record carries table id x. The code reads x as a rootpage first.
+  // If no schema knows it, the binding of id x gives the page
+  // (rootpage_for_table_id, mod.rs:2919-2932). With FixPermanentLogId, core
+  // writes the table that owns id x. The set holds every name the code can
+  // pick. Set() means "cannot resolve user data table id" (mod.rs:2999).
+  //
+  // The binding branch needs a table y with tid[y] == x and a page. A record
+  // carries tid[o] only while o has no page (LogId), so y == o has no page.
+  // With FixDisjointIds a record id -page is never a temporary id, so no
+  // other y matches. So with FixDisjointIds the branch cannot fire, and
+  // NeverMapsFromBinding checks that in the sync modules that pass. With
+  // FixDisjointIds off it is not checked.
+  def MapNames(x: int): Set[str] =
+    if (FixPermanentLogId) Objs.filter(y => tid.get(y) == x)
+    else if (NamesFor(x) != Set()) NamesFor(x)
+    else Objs.filter(y => tid.get(y) == x and bind.get(y).in and bind.get(y).root > 0)
+           .map(y => NamesFor(bind.get(y).root)).flatten()
+
+  // "-" for no name, the name for one, "?" for more than one.
+  def MapName(x: int): str =
+    if (MapNames(x) == Set()) "-" else MapNames(x).fold("", (a, n) => if (a == "") n else "?")
 
   // INSERT of the one row of table o, as one atomic commit. The same commit
   // inserts the row of each live index of o, and the same log record carries
@@ -487,7 +569,24 @@ module MvccPassiveSchema {
                  else chain.get(x)),
       ins' = Objs.mapBy(x => if (ws.contains(x)) { ts: ts, id: LogId(x) } else ins.get(x)),
       scat' = scat,
-      UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+      // The object map of this commit (populate_portable_changes).
+      omap' = if (SyncObjectMap) omap.set(o, MapName(LogId(o))) else omap,
+      // MapInPass: the row commits with its temporary id while a pass that
+      // creates its B-tree runs, before the publish. MapFromCatalog: no
+      // schema knows the record id, and the sqlite_schema versions give the
+      // name. MapFromBinding: the binding branch of MapNames gives it.
+      seen' = if (not(SyncObjectMap)) seen
+              else seen
+                .union(if (Set("collect", "committed").contains(ck.pc)
+                           and InWindow(cat.get(o).c) and LogId(o) == tid.get(o))
+                         Set("MapInPass") else Set())
+                .union(if (not(FixPermanentLogId) and SchemaNames(LogId(o)) == Set()
+                           and CatNames(LogId(o)) != Set())
+                         Set("MapFromCatalog") else Set())
+                .union(if (not(FixPermanentLogId) and NamesFor(LogId(o)) == Set()
+                           and MapNames(LogId(o)) != Set())
+                         Set("MapFromBinding") else Set()),
+      UnchangedSchemaVars, UnchangedStoreVars, rd' = rd, err' = err,
     }
   }
 
@@ -982,7 +1081,7 @@ module MvccPassiveSchema {
       bind' = bind, nBackfill' = nBackfill, db' = db, durable' = durable,
       backfillFloor' = backfillFloor, nCk' = nCk, gcs' = gcs,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars,
-      ins' = ins, seen' = seen,
+      ins' = ins, omap' = omap, seen' = seen,
       err' = err,
     }
   }
@@ -1273,6 +1372,7 @@ module MvccPassiveSchema {
               else bind.get(x)),
     ck' = { ...IdleCk, history: ck.history },
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
+    omap' = omap,
     wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable, nCk' = nCk,
     rd' = rd, err' = err, gcs' = gcs,
   }
@@ -1319,7 +1419,7 @@ module MvccPassiveSchema {
     Lwm == Inf,
     chain' = chain.set(o, Set()),
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
-    scat' = scat, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
+    scat' = scat, omap' = omap, UnchangedStoreVars, rd' = rd, seen' = seen, err' = err,
   }
 
   // gc_version_chain on the sqlite_schema row of o (table id -1). The model
@@ -1360,7 +1460,7 @@ module MvccPassiveSchema {
       scat' = scat.set(o, { ...NoSCat, gone: true }),
       seen' = if (CatDropped(o)) seen.union(Set("CatalogGcDropped")) else seen,
       clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, chain' = chain,
-      ins' = ins, UnchangedStoreVars, rd' = rd, err' = err,
+      ins' = ins, omap' = omap, UnchangedStoreVars, rd' = rd, err' = err,
     }
   }
 
@@ -1398,7 +1498,7 @@ module MvccPassiveSchema {
 
   action UnchangedForGc = all {
     clock' = clock, lastCommitted' = lastCommitted, UnchangedSchemaVars, ins' = ins,
-    bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
+    omap' = omap, bind' = bind, wal' = wal, nBackfill' = nBackfill, db' = db, durable' = durable,
     backfillFloor' = backfillFloor, ck' = ck, nCk' = nCk, rd' = rd, err' = err,
   }
 
@@ -1728,6 +1828,23 @@ module MvccPassiveSchema {
       Pages.forall(p => LastImg.img.get(p).own != NoObj
                         implies (SchemaRoot(p) or droppedRoots.contains(p)))
 
+  // Sync push: the object map of the commit of each row names the table of
+  // the row. The client decodes the row with that name
+  // (decode_recovery_ops_to_logical_txn, database_sync_operations.rs:1319).
+  // A wrong name sends the row to another table. No name drops the row on
+  // the client, or fails the commit in core.
+  val ObjectMapCorrect: bool =
+    SyncObjectMap implies
+      Objs.forall(o => (not(Indexes.contains(o)) and ins.get(o).ts != 0) implies omap.get(o) == o)
+
+  // Sync pull: read_logical_replay_table_map (database_sync_operations.rs:2588)
+  // keys each table by the absolute value of its rootpage column. No two
+  // live tables get the same stable id.
+  val StableIdsDistinct: bool =
+    SyncObjectMap implies
+      tuples(Objs, Objs).forall(((x, y)) =>
+        (x != y and LiveTable(x) and LiveTable(y)) implies Abs(RootCol(x)) != Abs(RootCol(y)))
+
   val TypeOK: bool = and {
     0.to(MaxTs).contains(clock),
     0.to(wal.length()).contains(nBackfill),
@@ -1778,6 +1895,24 @@ module MvccPassiveSchema {
   // A catalog scan returns a row from the B-tree because GC dropped its
   // versions from the version store.
   val NeverCatalogFromBtree: bool = not(seen.contains("CatalogFromBtree"))
+  // A row record carries the id -page: the table had its page at the commit.
+  val NeverMapsPageId: bool =
+    not(Objs.exists(o => ins.get(o).ts != 0 and ins.get(o).id != tid.get(o)))
+  // A row commits with its temporary id while a pass that creates its
+  // B-tree runs, before the publish.
+  val NeverMapsInPass: bool = not(seen.contains("MapInPass"))
+  // A row commit finds its name only in the sqlite_schema versions: no
+  // schema knows the record id.
+  val NeverMapsFromCatalog: bool = not(seen.contains("MapFromCatalog"))
+  // The binding branch of MapNames gives the name. It must hold in the sync
+  // modules with FixDisjointIds (see MapNames).
+  val NeverMapsFromBinding: bool = not(seen.contains("MapFromBinding"))
+  // The stable id of a live table changed after a row record carried its
+  // temporary id: the rootpage column now holds its page (SYNC.md question 2).
+  val NeverStableIdChanges: bool =
+    not(Objs.exists(o => and {
+      LiveTable(o), ins.get(o).ts != 0, ins.get(o).id == tid.get(o), RootCol(o) > 0,
+    }))
   // Recovery replays a row record above the boundary.
   val NeverReplaysRow: bool =
     not(Objs.exists(o => LoggedLive(o) and ins.get(o).ts > Meta and Meta > 0))
