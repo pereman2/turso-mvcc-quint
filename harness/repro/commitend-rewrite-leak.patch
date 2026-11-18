@@ -1,8 +1,8 @@
 diff --git a/core/mvcc/database/tests.rs b/core/mvcc/database/tests.rs
-index a94c7f72f..5d930c6d6 100644
+index a94c7f72f..2a44b27ee 100644
 --- a/core/mvcc/database/tests.rs
 +++ b/core/mvcc/database/tests.rs
-@@ -5378,3 +5378,192 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
+@@ -5378,3 +5378,317 @@ fn empty_version_chain() -> RowVersionChain<TursoAllocator> {
          TursoAllocator,
      )
  }
@@ -156,8 +156,10 @@ index a94c7f72f..5d930c6d6 100644
 +
 +    // A pass in the window.
 +    let mut checkpoint = conn_c.prepare("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
-+    let ck_done = step_to_done(&mut checkpoint, 20_000);
-+    println!("group_commit = {group_commit}: pass in the window finished: {ck_done}");
++    assert!(
++        step_to_done(&mut checkpoint, 20_000),
++        "the pass in the window did not complete"
++    );
 +    drop(checkpoint);
 +
 +    // F finishes its rewrite. R ends. Three more passes run.
@@ -194,4 +196,127 @@ index a94c7f72f..5d930c6d6 100644
 +fn serialized_commit_rewrite_window_keeps_checkpoint_stamps() {
 +    let left = run_rewrite_window_checkpoint_test(false);
 +    assert_eq!(left, 0, "control without group commit: {left} row versions left");
++}
++
++// Same leak without group commit. A commit takes end_ts in CommitValidation,
++// before BuildLogRecord and before it takes pager_commit_lock. Writer A
++// (smaller ts) waits in BuildLogRecord while writer B (larger ts) commits to
++// the end and raises last_committed_tx_ts above the end_ts of A. Then A takes
++// the lock, reaches CommitEnd, and a pass in its rewrite window stamps its rows.
++#[test]
++fn out_of_order_commit_rewrite_window_keeps_checkpoint_stamps() {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let setup = db.connect();
++    setup
++        .execute("CREATE TABLE t(pk INTEGER PRIMARY KEY, v INTEGER)")
++        .unwrap();
++    setup
++        .execute("PRAGMA mvcc_checkpoint_threshold = -1")
++        .unwrap();
++    setup.execute("PRAGMA mvcc_group_commit = no").unwrap();
++    let root = get_rows(
++        &setup,
++        "SELECT rootpage FROM sqlite_schema WHERE name = 't'",
++    )[0][0]
++        .as_int()
++        .unwrap();
++    setup.close().unwrap();
++    let store = db.get_mvcc_store();
++    let table_id = store.get_table_id_from_root_page(root);
++
++    // R keeps the lwm below MAX, so GC Rule 3 does not drop rows in the window.
++    let reader = db.connect();
++    reader.execute("BEGIN").unwrap();
++    assert_eq!(
++        get_rows(&reader, "SELECT count(*) FROM t")[0][0]
++            .as_int()
++            .unwrap(),
++        0
++    );
++
++    // A inserts 1100 rows and steps its COMMIT until it is Preparing and a step
++    // returned IO: BuildLogRecord yielded after the first 1024 rows.
++    let conn_a = db.connect();
++    conn_a.execute("BEGIN CONCURRENT").unwrap();
++    for pk in 1..=1100 {
++        conn_a
++            .execute(format!("INSERT INTO t VALUES ({pk}, {pk})"))
++            .unwrap();
++    }
++    let tx_a = conn_a.get_mv_tx_id().unwrap();
++    let mut commit_a = conn_a.prepare("COMMIT").unwrap();
++    let mut in_build = false;
++    for _ in 0..100_000 {
++        match commit_a.step().unwrap() {
++            StepResult::Done => panic!("COMMIT of A finished before the BuildLogRecord yield"),
++            StepResult::IO | StepResult::Yield => {
++                if matches!(
++                    store.txs.get(&tx_a).unwrap().value().state.load(),
++                    TransactionState::Preparing(_)
++                ) {
++                    in_build = true;
++                    break;
++                }
++            }
++            other => panic!("unexpected step result {other:?}"),
++        }
++    }
++    assert!(in_build, "A never yielded while Preparing");
++
++    // B commits to the end. Its end_ts is above the one of A.
++    let conn_b = db.connect();
++    conn_b.execute("BEGIN CONCURRENT").unwrap();
++    conn_b.execute("INSERT INTO t VALUES (5000, 1)").unwrap();
++    conn_b.execute("COMMIT").unwrap();
++
++    // A steps until it is Committed and a step returned IO: the rewrite yielded
++    // after 1024 rows.
++    let mut in_window = false;
++    for _ in 0..100_000 {
++        match commit_a.step().unwrap() {
++            StepResult::Done => panic!("COMMIT of A finished before the rewrite window"),
++            StepResult::IO | StepResult::Yield => {
++                if matches!(
++                    store.txs.get(&tx_a).unwrap().value().state.load(),
++                    TransactionState::Committed(_)
++                ) {
++                    in_window = true;
++                    break;
++                }
++            }
++            other => panic!("unexpected step result {other:?}"),
++        }
++    }
++    assert!(in_window, "A never reached Committed with a yield");
++
++    // A pass in the window.
++    let conn_c = db.connect();
++    let mut checkpoint = conn_c.prepare("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    assert!(
++        step_to_done(&mut checkpoint, 20_000),
++        "the pass in the window did not complete"
++    );
++    drop(checkpoint);
++
++    // A finishes its rewrite. R ends. Three more passes run.
++    assert!(step_to_done(&mut commit_a, 100_000), "A did not finish");
++    drop(commit_a);
++    reader.execute("COMMIT").unwrap();
++    for _ in 0..3 {
++        conn_c.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    }
++
++    let check = db.connect();
++    assert_eq!(
++        get_rows(&check, "SELECT count(*) FROM t")[0][0]
++            .as_int()
++            .unwrap(),
++        1101
++    );
++    let left = table_versions_left(&store, table_id);
++    println!("out of order commit: {left} row versions of t left in mv_store.rows");
++    assert_eq!(
++        left, 0,
++        "the TxID rewrite reset materialized_at after a pass stamped the rows: {left} row versions stay in memory"
++    );
 +}

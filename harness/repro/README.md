@@ -107,7 +107,7 @@ The test failed in 3 of 3 runs.
 
 ## commitend-rewrite-leak.patch
 
-The patch applies to turso main at `9cf2de2d8`. It adds two tests to
+The patch applies to turso main at `9cf2de2d8`. It adds three tests to
 `core/mvcc/database/tests.rs` and changes no engine code. A group commit
 follower F is between `CommitEnd` and `FinalizeCommit` (its rewrite yields after
 1024 rows). A later commit B finishes, and a passive pass stamps the rows of F.
@@ -116,6 +116,7 @@ Then the rewrite resets the stamps and GC never drops the rows (gap 22).
 | Test | Gap | Expected | Actual on 9cf2de2d8 |
 |---|---|---|---|
 | `group_commit_rewrite_window_keeps_checkpoint_stamps` | 22 | No row version of `t` stays in `mv_store.rows` after the reader ends and three more passes | 76 versions stay |
+| `out_of_order_commit_rewrite_window_keeps_checkpoint_stamps` | 22 | The same, without group commit: A waits in `BuildLogRecord`, B commits to the end, then the pass runs in the window of A | 76 versions stay |
 | `serialized_commit_rewrite_window_keeps_checkpoint_stamps` | 22, control | The same steps without group commit leave none | Passes, 0 left |
 
 The test uses the SQL of public API only for the data. To place F in the window
@@ -130,4 +131,4 @@ cd <turso>
 cargo test -p turso_core --lib rewrite_window_keeps_checkpoint_stamps -- --nocapture --test-threads=1
 ```
 
-The group commit test failed in 3 of 3 runs, with 76 versions left each time.
+The group commit test and the out of order test failed in 3 of 3 runs each, with 76 versions left each time.
