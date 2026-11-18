@@ -285,6 +285,32 @@ instead of `CookieNotBehind`.
 | `reachGcAfterBegin` | Not replayed to the `GcApply` step. The traces that `quint run` found stop first at the existing `GcDropped` hole at `CheckpointFinish` or at the refusal of a frame between a pin and a begin. So this run does not show that the engine rechecks the lwm |
 | 200 random `gcSample` and `gcSampleCatalog` traces | Most conform. The rest fail with `CookieBehind` (#11499) or `RecoveryRows` (#11502), or `GcDropped` at `CheckpointFinish`, or are refused. Random traces of the old spec `main` fail the same ways |
 
+## Traces of `ReaderUpdate` (gap 7)
+
+The driver `RowDriver::new_with_updates()` makes readers use `BEGIN CONCURRENT`.
+The step `ReaderUpdate` runs an UPSERT, then steps `COMMIT` to
+`WaitForDependencies` (after the commit check). The engine decides the
+write-write conflict there, and the driver compares it with the spec
+(`rmw` gained a row, or not). After a commit that passed, the connection is a
+writer under the spec timestamp, and the reader gets a new connection at its
+next `ReaderPin`. Failure kind: `Conflict`. The test
+`update_witness_traces_conform` replays `ww-<witness>.itf.json` in
+`harness/mbt_tests/traces/`, made with `make bug-traces` from the modules
+`mbtUpdate*` (the `mbt` constants with `MaxCheckpoints = 2`, 1 key, `Updates = true`).
+
+| Trace | Engine result |
+|---|---|
+| `ww-reachUpdateCommits` (update at step 28) | Conforms |
+| `ww-reachUpdateConflict` (update at step 5) | Conforms: the engine reports the conflict |
+| `ww-reachConflictByEndOnly` (update at step 19) | Conforms: the engine reports the conflict |
+| `ww-reachConflictAfterGc` (update at step 38) | Conforms: the engine reports the conflict |
+| `ww-reachConflictByCurrentOnly` (update at step 5) | Conforms: the engine reports the conflict. The spec leaves out the commit-dependency path. See `DESIGN-rows.md`, "Write-write conflicts and GC" |
+
+Regression replay after the spec got the new variable: 100 fresh traces of
+`mbt` and 100 of `mbtBlocking`, before and after, each `100 traces: 100
+replayed, 0 refused, 0 failed`. Random traces never hold `ReaderUpdate`,
+because those modules have `Updates = false`.
+
 ## Limits
 
 - The schema driver supports DDL CREATE and DROP, row writes, the

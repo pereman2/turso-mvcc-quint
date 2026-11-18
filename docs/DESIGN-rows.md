@@ -412,6 +412,104 @@ Counts from an interrupted search are not complete state-space counts.
 | `reachEarlyStampGc` | Fail (expected) | `NeverGcEarlyStampWithReader` | 7,970 |
 | `reachEarlyStampGcAfterFailure` | Fail (expected) | `NeverGcEarlyStampAfterFailure` | 144,369 |
 
+## Write-write conflicts and GC
+
+Question: can GC drop a version that a write-write check needs, so that an
+update is lost? Gap 7 in `MODEL-GAPS.md`. Code lines are turso rev 0c9fe0dd9.
+
+The spec has a feature constant `Updates` (false in every older module) and a
+guard `GuardRule2Lwm` (true in every older module: Rule 2 needs `v.e < lwm`,
+mod.rs:8606; the engine test is `e <= lwm`, and the two are equal because
+timestamps are unique). `ReaderUpdate(r, k)` is one step for a registered reader: it
+decides the conflict with `EndEvidence` and `CurrentEvidence`, and it either
+rolls back or adds a new version and a Preparing commit. After a writer W has
+written `k`, the chain holds W's TxID, GC keeps it, and another writer sees
+a conflict at its commit check (an Active insert is invisible to a second
+inserter). So the window that matters is from W's begin to W's first write of
+`k`. `ReaderBegin`, `Gc` and `ReaderUpdate` are separate steps, so the model
+keeps that window. `NoLostUpdate` is first committer wins: no write of `k` has
+a timestamp between the begin and the commit of an update.
+
+| Module | Result | Distinct states | Seconds |
+|---|---|---|---|
+| `main` | No error | 17,344,980 | 473 |
+| `updates` (2 readers, 5 timestamps, 1 pass) | No error (all main invariants and `NoLostUpdate`) | 8,466,039 | 206 |
+| `reachUpdateCommits` | `NeverUpdateCommits` fails | 96 | 9 |
+| `reachUpdateConflict` | `NeverUpdateConflict` fails | 137 | 9 |
+| `reachConflictByEndOnly` | `NeverConflictByEndOnly` fails | 420 | 9 |
+| `reachConflictByCurrentOnly` | `NeverConflictByCurrentOnly` fails | 187 | 8 |
+| `reachConflictAfterGc` | `NeverConflictAfterGc` fails | 42,988 | 10 |
+| `updatesNoGcWait` | No error (`NoLostUpdate`) | 351,787 | 15 |
+| `updatesNoRule2Lwm` | No error (`NoLostUpdate`) | 73,230 | 10 |
+| `updatesNoRule2LwmNoGcWait` | `NoLostUpdate` fails | 2,303 | 10 |
+| `updatesNoIdleRule3NoGcWait` | `NoLostUpdate` fails | 599 | 11 |
+| `updatesGcSampleNoRecheck` (2 passes) | No error (`NoLostUpdate`) | 1,481,376 | 99 |
+| `updatesGcSampleNoRecheckNoGcWait` | `NoLostUpdate` fails | 2,211 | 9 |
+| `blockingUpdates` | No error (blockingMain invariants and `NoLostUpdate`) | 18,458 | 11 |
+| `blockingUpdatesNoRule2Lwm` | No error (`NoLostUpdate`) | 21,378 | 11 |
+
+Size S is 1 key, 1 reader, 4 timestamps and 1 pass, except where the table
+says 2 passes. Counts of a failing run are where TLC stopped, so they change
+between runs. The run of `updates` with 2 passes was not tried (the run with 1
+pass took 206 s). `noGcWait` and `blockingNoB2Keep` still fail
+`RecoveryCorrect` and `ReadsCorrect`.
+
+Reading of the results:
+
+- Each guard that GC uses alone is not shown needed: the lwm term of Rule 2
+  and the floor with the idle Rule 3 guard each keep what an update needs at these bounds. With both
+  off, GC drops the delete (Rule 2) or the only current version (Rule 3) and an
+  update commits over a newer write. In these two traces the update is step 18
+  (`updatesNoRule2LwmNoGcWait`) and step 11 (`updatesNoIdleRule3NoGcWait`).
+  Both end with `Gc`, then `ReaderUpdate`. They are model what-ifs, not engine
+  bugs: the code has both guards.
+- The first run of `updatesNoGcWait` listed every main invariant and failed.
+  That was a mistake in the configuration, not a result: with
+  `GuardGcWaitsForReaders` off, `RecoveryCorrect` fails already, as in
+  `noGcWait`. The module now lists `NoLostUpdate` only.
+- Not shown, so not claimed: more than one key, deletes by the updater,
+  2 passes with 2 readers, indexes.
+
+Model gap. After the step the updater leaves `Registered`. In the engine W stays
+in `txs` as Preparing, and its begin still counts in the lwm. So the model GC can
+drop more than the engine. This is safe: W needs no version after its check,
+and every other reader has its own begin in the lwm.
+
+Trace replay. The driver step `ReaderUpdate` (`harness/mbt_tests/rows.rs`) runs
+`INSERT ... ON CONFLICT DO UPDATE` in a `BEGIN CONCURRENT` reader and steps
+`COMMIT` to `WaitForDependencies`, after the commit check. The engine decides
+the conflict in that step. The spec adds `"wwConflict"` or a version, and the
+driver compares. 
+The commit-dependency path is not modeled. `ReaderUpdate` is not enabled while
+an in-flight write of `k` has a timestamp below the begin `b` of the updater. In
+the engine the updater then sees the Preparing version speculatively
+(`is_begin_visible`, mod.rs:11234-11248), registers a commit dependency, and gets
+no conflict (`is_write_write_conflict`, mod.rs:10884). This path is safe
+for `NoLostUpdate` because writes of `k` are serialized: `WritePrepare` and the
+commit branch of `ReaderUpdate` both need no in-flight write of `k`. So while an
+in-flight write below `b` exists, no write of `k` lies in `(b, clock]`. A
+Preparing delete of `k` below `b` is a different case: the engine hides that
+version (mod.rs:11324-11331) and the commit check gives a conflict
+(mod.rs:2232-2245, 2299-2308). That conflict has no cause, and it can abort an
+update that snapshot isolation allows. It is a lead with no run, and it cannot
+lose an update. An in-flight
+write with a timestamp above `b` stays a conflict in the model. The update
+statement does not see that version, and the commit check
+(`check_version_conflicts`, about mod.rs:2280-2290) raises `WriteWriteConflict`
+for a Preparing owner. So in this case the conflict comes at commit time, and the
+driver accepts a conflict from the statement or from the commit.
+
+Difference found by the replay, fixed in the spec: the first version of
+`reachConflictByCurrentOnly` had a writer W (timestamp 2, Preparing) and a
+reader `r2` that began at 3 and updated `k1`. The spec said conflict, the engine
+did not (the commit-dependency path above). The spec now leaves that step out.
+After the change all five witnesses (`ww-reachUpdateCommits`,
+`ww-reachUpdateConflict`, `ww-reachConflictByEndOnly`,
+`ww-reachConflictByCurrentOnly`, `ww-reachConflictAfterGc`) replay on the engine,
+and the regression replay gives 100 of 100 traces for `mbt` and `mbtBlocking`. The trace `ww-reachConflictAfterGc` runs `Gc` before
+the updater begins, so the replay does not show committed evidence kept across a
+GC while the updater is open. Only the TLC negative controls show that.
+
 ## Mode B
 
 Mode B is the default. The flag `experimental_mvcc_passive_checkpoint` is off.
