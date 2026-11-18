@@ -27,7 +27,10 @@ module main {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -51,7 +54,10 @@ module mainPassive {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -76,7 +82,10 @@ module fixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -100,7 +109,10 @@ module fixedPassive {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -126,7 +138,10 @@ module twoCrashes {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -152,7 +167,10 @@ module issue7480 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -176,7 +194,10 @@ module issue7480Fixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -201,7 +222,10 @@ module issue9749 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -225,7 +249,10 @@ module issue9749Fixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -252,7 +279,10 @@ module leadA {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -281,7 +311,10 @@ module leadB {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -306,7 +339,10 @@ module leadBStated {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -331,7 +367,10 @@ module leadBZeros {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -358,7 +397,10 @@ module idea1 {
     RecoveryOneTs = true,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -385,7 +427,10 @@ module idea2 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -412,7 +457,10 @@ module idea2Passive {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -436,7 +484,10 @@ module idea2Fixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -460,7 +511,10 @@ module idea2PassiveFixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -488,7 +542,10 @@ module logTruncSplit {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = true,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -516,7 +573,10 @@ module logTruncError {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = true
+    LogTruncateErrors = true,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -542,7 +602,10 @@ module reachTruncWindow {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -567,7 +630,10 @@ module reachWalFramesNoLog {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -592,7 +658,10 @@ module reachInvalidHeaderWithWal {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -616,7 +685,10 @@ module reachCleanCloseWithWal {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -641,7 +713,10 @@ module reachFailAfterPublish {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -666,7 +741,10 @@ module reachFailAfterPublishFlagOn {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -692,7 +770,10 @@ module reachFailBeforePublish {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -717,7 +798,10 @@ module reachCommitInPublishWindow {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -742,7 +826,10 @@ module reachFsyncCoversUnacked {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -767,7 +854,10 @@ module repairFixed {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -793,7 +883,10 @@ module repairFixedOpen {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -818,7 +911,10 @@ module repairFixedPassive {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -844,7 +940,10 @@ module repairFixedPassiveOpen {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -869,7 +968,10 @@ module repairIssue7480 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -894,7 +996,10 @@ module repairIssue9749 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -921,7 +1026,10 @@ module repairLeadBZeros {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -946,7 +1054,10 @@ module repairIdea2 {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -971,7 +1082,10 @@ module repairIdea2Passive {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -995,7 +1109,10 @@ module reachReplayMany {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -1020,7 +1137,10 @@ module reachCkOfReplayedRows {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -1045,7 +1165,10 @@ module reachLogRetained {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -1070,7 +1193,10 @@ module reachTruncFlag {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -1095,7 +1221,10 @@ module reachCrashInRecovery {
     RecoveryOneTs = false,
     FixStampBelowBoundary = true,
     AsyncLogTruncate = false,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
 
@@ -1119,6 +1248,322 @@ module reachAppendErased {
     RecoveryOneTs = false,
     FixStampBelowBoundary = false,
     AsyncLogTruncate = true,
-    LogTruncateErrors = false
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: as main, with SyncMode NORMAL. A commit does not fsync
+// the log, and a crash can drop acknowledged commits. The promise is
+// NormalPrefix: one commit point, no older than the last promise.
+// Invariants: TypeOK RunCorrect NormalPrefix
+module normal {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = false,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: as mainPassive, with SyncMode NORMAL. A backfill always
+// copies the frames (and fsyncs the WAL).
+// Invariants: TypeOK RunCorrect NormalPrefix
+module normalPassive {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NormalPrefix to fail: as normalPassive, and a passive backfill can
+// copy no frame (a pinned reader or Busy). The pager commit of the checkpoint
+// does not fsync the WAL under NORMAL, and no backfill fsyncs it, so the
+// checkpoint truncates the log durably and loses its own rows on power loss.
+// Gap 19, a predicted engine bug.
+// Invariants: NormalPrefix
+module normalBackfillSkip {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: as normalBackfillSkip, and the checkpoint pager commit
+// fsyncs the WAL also under NORMAL (FixCkCommitSyncsWal).
+// Invariants: TypeOK RunCorrect NormalPrefix
+module normalBackfillSkipFixed {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = true
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: control for normalBackfillSkip. As mainPassive with a
+// passive backfill that can copy no frame, under SyncMode FULL.
+// Invariants: TypeOK RecoveryCorrect
+module fullBackfillSkip {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverLostUnsynced to fail: under NORMAL a crash that keeps only
+// fsynced data drops an acknowledged commit or an unsynced WAL frame.
+// Invariants: NeverLostUnsynced
+module reachNormalLoss {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = false,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverBackfillSkipped to fail: a passive backfill copies no frame
+// while WAL frames exist (normalBackfillSkip).
+// Invariants: NeverBackfillSkipped
+module reachBackfillSkipped {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverPublishDurableNormal to fail: under NORMAL a checkpoint fsyncs
+// the log while a commit is in flight, so the commit is durable when it
+// publishes and floor reaches its timestamp.
+// Invariants: NeverPublishDurableNormal
+module reachPublishDurableNormal {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverBackfillSkippedUnsynced to fail: the same, and a WAL frame is
+// not durable.
+// Invariants: NeverBackfillSkippedUnsynced
+module reachBackfillSkippedUnsynced {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverBackfillSkipped to fail: the skip is reachable with
+// FixCkCommitSyncsWal on, so normalBackfillSkipFixed passes for a reason.
+// Invariants: NeverBackfillSkipped
+module reachBackfillSkippedFixed {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = true
+  ).* from "./MvccRecovery"
+}
+
+// Expect NeverBackfillSkipped to fail: the skip is reachable under FULL, so
+// fullBackfillSkip passes for a reason.
+// Invariants: NeverBackfillSkipped
+module reachBackfillSkippedFull {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 }
