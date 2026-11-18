@@ -67,6 +67,9 @@ enum Failure {
     /// A mode B pass returned an error where the spec pass succeeded, or the
     /// other way.
     CheckpointResult,
+    /// A reader update hit a write-write conflict where the spec had none, or
+    /// the other way.
+    Conflict,
     /// The engine chain of a key has another number of versions than the
     /// spec chain, after a GC step or a mode B pass.
     Chain,

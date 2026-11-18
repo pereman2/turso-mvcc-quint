@@ -7,6 +7,7 @@ use std::ops::Bound;
 
 use super::itf::{Itf, Step};
 use super::*;
+use crate::LimboError;
 
 struct Writer {
     conn: Arc<Connection>,
@@ -14,6 +15,9 @@ struct Writer {
     commit: crate::Statement,
     tx_id: u64,
     logged: bool,
+    /// The connection belongs to a reader (`ReaderUpdate`), so it does not
+    /// go back to the pool of writer connections.
+    reader_owned: bool,
 }
 
 enum ReaderState {
@@ -28,6 +32,8 @@ enum ReaderState {
 
 struct Reader {
     conn: Arc<Connection>,
+    /// Set when the driver replays `ReaderUpdate` steps.
+    stop: Option<Arc<StopAt>>,
     state: ReaderState,
 }
 
@@ -53,6 +59,8 @@ pub(super) struct RowDriver {
     last_wal: (u32, u64),
     /// Mode B: the passive checkpoint flag is off, and a pass is one spec step.
     blocking: bool,
+    /// Readers use `BEGIN CONCURRENT` and can run `ReaderUpdate`.
+    updates: bool,
 }
 
 impl Driver for RowDriver {
@@ -66,6 +74,7 @@ impl Driver for RowDriver {
             "ReaderReadStart" => self.reader_read_start(step)?,
             "ReaderReadEnd" => self.reader_read_end(step)?,
             "ReaderEnd" => self.reader_end(step)?,
+            "ReaderUpdate" => self.reader_update(step)?,
             "CheckpointBlocking" => self.checkpoint_blocking(step, false)?,
             "CheckpointBlockingFail" => self.checkpoint_blocking(step, true)?,
             "CheckpointStart" => self.checkpoint_start(step)?,
@@ -107,16 +116,30 @@ impl RowDriver {
 
     /// A driver for mode B: the passive checkpoint flag is off.
     pub(super) fn new_blocking() -> Self {
-        Self::with_mode(&["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"], true)
+        Self::with_mode(
+            &["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"],
+            true,
+            false,
+        )
+    }
+
+    /// A driver for traces with `ReaderUpdate` steps: readers use `BEGIN
+    /// CONCURRENT`.
+    pub(super) fn new_with_updates() -> Self {
+        Self::with_mode(
+            &["CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)"],
+            false,
+            true,
+        )
     }
 
     /// A driver for table `t` of `schema`, which must have an integer
     /// primary key `k` and an integer column `v`.
     pub(super) fn with_schema(schema: &[&str]) -> Self {
-        Self::with_mode(schema, false)
+        Self::with_mode(schema, false, false)
     }
 
-    fn with_mode(schema: &[&str], blocking: bool) -> Self {
+    fn with_mode(schema: &[&str], blocking: bool, updates: bool) -> Self {
         let db = if blocking {
             MvccTestDbNoConn::new_with_random_db()
         } else {
@@ -157,6 +180,7 @@ impl RowDriver {
             frames_before_seq: BTreeMap::new(),
             last_wal: (0, 0),
             blocking,
+            updates,
         };
         driver
             .engine_ts
@@ -216,6 +240,7 @@ impl RowDriver {
                 commit,
                 tx_id,
                 logged: false,
+                reader_owned: false,
             },
         );
     }
@@ -249,7 +274,9 @@ impl RowDriver {
             "COMMIT must finish"
         );
         drop(writer.commit);
-        self.free_writers.push((writer.conn, writer.stop));
+        if !writer.reader_owned {
+            self.free_writers.push((writer.conn, writer.stop));
+        }
         Ok(())
     }
 
@@ -257,9 +284,22 @@ impl RowDriver {
         let name = step.pick("r").str().to_string();
         let mark = step.var("rd").get_str(&name).field("mark").int();
         let db = &self.db;
-        let reader = self.readers.entry(name.clone()).or_insert_with(|| Reader {
-            conn: db.connect(),
-            state: ReaderState::Idle,
+        let updates = self.updates;
+        let reader = self.readers.entry(name.clone()).or_insert_with(|| {
+            if updates {
+                let (conn, stop) = connect_with_stop(db);
+                Reader {
+                    conn,
+                    stop: Some(stop),
+                    state: ReaderState::Idle,
+                }
+            } else {
+                Reader {
+                    conn: db.connect(),
+                    stop: None,
+                    state: ReaderState::Idle,
+                }
+            }
         });
         let pager = reader.conn.pager.load();
         pager.begin_read_tx().unwrap();
@@ -283,7 +323,12 @@ impl RowDriver {
         let ReaderState::Pinned = reader.state else {
             panic!("ReaderBegin of a reader that is not pinned");
         };
-        reader.conn.execute("BEGIN").unwrap();
+        let begin = if self.updates {
+            "BEGIN CONCURRENT"
+        } else {
+            "BEGIN"
+        };
+        reader.conn.execute(begin).unwrap();
         get_rows(&reader.conn, "SELECT count(*) FROM t");
         reader.state = ReaderState::Active { key: 0 };
         Ok(())
@@ -368,6 +413,103 @@ impl RowDriver {
             pager.end_read_tx();
         }
         reader.state = ReaderState::Idle;
+        Ok(())
+    }
+
+    /// A reader updates one key and commits, as one spec step. The engine
+    /// decides the write-write conflict here: in the statement or in the
+    /// commit check. The spec step added a version, or it did not. After a
+    /// commit that passed the check, the connection moves to `writers` in the
+    /// Preparing state under the spec commit timestamp. The reader leaves
+    /// `readers`, so its next `ReaderPin` makes a new connection.
+    fn reader_update(&mut self, step: &Step) -> StepOutcome {
+        if !self.updates {
+            return refuse("ReaderUpdate needs a driver with BEGIN CONCURRENT readers");
+        }
+        let name = step.pick("r").str().to_string();
+        let key = spec_key(step.pick("k"));
+        let ts = step.var("clock").int();
+        let begin = step.var("rd").get_str(&name).field("b").int();
+        // The spec step committed when it added `{ k, b, ts: clock }` to rmw.
+        let committed = step.var("rmw").items().iter().any(|u| {
+            spec_key(u.field("k")) == key
+                && u.field("b").int() == begin
+                && u.field("ts").int() == ts
+        });
+        let (conn, stop) = {
+            let reader = &self.readers[&name];
+            let ReaderState::Active { .. } = reader.state else {
+                panic!("ReaderUpdate of a reader that is not active");
+            };
+            (reader.conn.clone(), reader.stop.clone().unwrap())
+        };
+        let value = if committed { ts } else { ts + 1 };
+        let sql = format!(
+            "INSERT INTO t VALUES ({key}, {value}) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
+        );
+        let mut conflict = None;
+        let mut prepared = None;
+        match conn.execute(&sql) {
+            Err(LimboError::WriteWriteConflict) => conflict = Some("the statement"),
+            Err(err) => {
+                return fail(Failure::Conflict, format!("the update failed with {err:?}"));
+            }
+            Ok(_) => {
+                let tx_id = conn.get_mv_tx_id().unwrap();
+                stop.set(
+                    CommitYieldPoint::WaitForDependencies.point(),
+                    Some(commit_yield_key(tx_id)),
+                );
+                let mut commit = conn.prepare("COMMIT").unwrap();
+                match step_statement_result(&mut commit, &stop, &self.io) {
+                    Ok(true) => prepared = Some((commit, tx_id)),
+                    Ok(false) => panic!("COMMIT finished before its commit dependencies wait"),
+                    Err(LimboError::WriteWriteConflict) => conflict = Some("the commit check"),
+                    Err(err) => {
+                        return fail(Failure::Conflict, format!("the commit failed with {err:?}"));
+                    }
+                }
+            }
+        }
+        if conflict.is_some() == committed {
+            return fail(
+                Failure::Conflict,
+                format!(
+                    "reader {name} updated k{key} at begin {begin}: spec committed {committed}, \
+                     engine conflict {conflict:?}"
+                ),
+            );
+        }
+        match prepared {
+            Some((commit, tx_id)) => {
+                self.readers.remove(&name);
+                let end_ts = match self.mv.txs.get(&tx_id).unwrap().value().state.load() {
+                    TransactionState::Preparing(end_ts) => end_ts,
+                    other => panic!("a stopped COMMIT must be Preparing, got {other:?}"),
+                };
+                self.engine_ts.insert(ts, end_ts);
+                self.writers.insert(
+                    ts,
+                    Writer {
+                        conn,
+                        stop,
+                        commit,
+                        tx_id,
+                        logged: false,
+                        reader_owned: true,
+                    },
+                );
+            }
+            None => {
+                // The statement or the commit rolled back, or the test does.
+                self.readers.get_mut(&name).unwrap().state = ReaderState::Idle;
+                let _ = conn.execute("ROLLBACK");
+                let pager = conn.pager.load();
+                if pager.holds_read_lock() {
+                    pager.end_read_tx();
+                }
+            }
+        }
         Ok(())
     }
 
@@ -802,6 +944,28 @@ const GENERATED_ROW_TRACES: [(&str, &str); 7] = [
     ("rows-196", include_str!("traces/rows-196.itf.json")),
 ];
 
+/// Steps `stmt` like `step_statement`, and returns the error of the engine.
+fn step_statement_result(
+    stmt: &mut crate::Statement,
+    stop: &StopAt,
+    io: &Arc<dyn IO>,
+) -> Result<bool, LimboError> {
+    for _ in 0..STEP_LIMIT {
+        match stmt.step()? {
+            StepResult::IO | StepResult::Yield => {
+                if stop.fired() {
+                    return Ok(true);
+                }
+                io.step().unwrap();
+            }
+            StepResult::Row => {}
+            StepResult::Done => return Ok(false),
+            other => panic!("unexpected statement step result {other:?}"),
+        }
+    }
+    panic!("statement did not stop in {STEP_LIMIT} steps");
+}
+
 #[test]
 fn generated_row_traces_conform() {
     let mut replayed = 0;
@@ -813,6 +977,52 @@ fn generated_row_traces_conform() {
     assert!(
         replayed == GENERATED_ROW_TRACES.len(),
         "only {replayed} traces replayed: a change to the driver or the engine refuses more traces"
+    );
+}
+
+/// Witness traces of `ReaderUpdate` (gap 7), from `make bug-traces` of the
+/// modules `mbtUpdate*` with `Updates = true`. The engine decides each
+/// write-write conflict inside the spec step.
+const UPDATE_WITNESS_TRACES: [(&str, &str); 5] = [
+    (
+        "ww-reachUpdateCommits",
+        include_str!("traces/ww-reachUpdateCommits.itf.json"),
+    ),
+    (
+        "ww-reachUpdateConflict",
+        include_str!("traces/ww-reachUpdateConflict.itf.json"),
+    ),
+    (
+        "ww-reachConflictByEndOnly",
+        include_str!("traces/ww-reachConflictByEndOnly.itf.json"),
+    ),
+    (
+        "ww-reachConflictByCurrentOnly",
+        include_str!("traces/ww-reachConflictByCurrentOnly.itf.json"),
+    ),
+    (
+        "ww-reachConflictAfterGc",
+        include_str!("traces/ww-reachConflictAfterGc.itf.json"),
+    ),
+];
+
+#[test]
+fn update_witness_traces_conform() {
+    let mut replayed = 0;
+    for (name, trace) in UPDATE_WITNESS_TRACES {
+        if replay(
+            name,
+            trace,
+            Expect::Conforms,
+            &mut RowDriver::new_with_updates(),
+        ) == Replay::Done
+        {
+            replayed += 1;
+        }
+    }
+    assert!(
+        replayed == UPDATE_WITNESS_TRACES.len(),
+        "only {replayed} traces replayed: the engine and the spec disagree on a ReaderUpdate"
     );
 }
 
