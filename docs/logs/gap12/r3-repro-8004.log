@@ -1,0 +1,49 @@
+turso rev: ae2cb738864cf98d7a332f796e0448fcee9bedf8
+ tests/integration/mvcc/database.rs | 170 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 170 insertions(+)
+checkpoint stopped before publish: shared schema roots t1,t2 = [Some(-5), None], store rows versions = 3
+checkpoint stopped after publish: shared schema roots t1,t2 = [Some(4), None], store rows versions = 4
+after COMMIT of t2: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 4
+after the checkpoint finished: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 1
+conn1: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+conn2: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+new conn3: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+after one more checkpoint: shared schema roots t1,t2 = [Some(4), Some(5)], store rows versions = 0
+new connection after one more checkpoint: INSERT INTO t1 -> Ok(())
+thread 'mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc' panicked at tests/integration/mvcc/database.rs:13563:5:
+INSERT INTO t1 failed on ["conn1", "conn2", "new conn3"]
+test mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2211 filtered out; finished in 0.13s
+error: test failed, to rerun pass `-p core_tester --test integration_tests`
+RUN-1-DONE
+checkpoint stopped before publish: shared schema roots t1,t2 = [Some(-5), None], store rows versions = 3
+checkpoint stopped after publish: shared schema roots t1,t2 = [Some(4), None], store rows versions = 4
+after COMMIT of t2: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 4
+after the checkpoint finished: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 1
+conn1: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+conn2: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+new conn3: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+after one more checkpoint: shared schema roots t1,t2 = [Some(4), Some(5)], store rows versions = 0
+new connection after one more checkpoint: INSERT INTO t1 -> Ok(())
+thread 'mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc' panicked at tests/integration/mvcc/database.rs:13563:5:
+INSERT INTO t1 failed on ["conn1", "conn2", "new conn3"]
+test mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2211 filtered out; finished in 0.02s
+error: test failed, to rerun pass `-p core_tester --test integration_tests`
+RUN-2-DONE
+checkpoint stopped before publish: shared schema roots t1,t2 = [Some(-5), None], store rows versions = 3
+checkpoint stopped after publish: shared schema roots t1,t2 = [Some(4), None], store rows versions = 4
+after COMMIT of t2: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 4
+after the checkpoint finished: shared schema roots t1,t2 = [Some(-5), Some(-7)], store rows versions = 1
+conn1: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+conn2: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+new conn3: INSERT INTO t1 -> Err(Corrupt("portable changes cannot resolve user data table id MVTableId(-4)"))
+after one more checkpoint: shared schema roots t1,t2 = [Some(4), Some(5)], store rows versions = 0
+new connection after one more checkpoint: INSERT INTO t1 -> Ok(())
+thread 'mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc' panicked at tests/integration/mvcc/database.rs:13563:5:
+INSERT INTO t1 failed on ["conn1", "conn2", "new conn3"]
+test mvcc::database::portable_insert_after_stale_schema_install_and_catalog_gc ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2211 filtered out; finished in 0.02s
+error: test failed, to rerun pass `-p core_tester --test integration_tests`
+RUN-3-DONE
+REPRO2-DONE

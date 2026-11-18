@@ -54,3 +54,53 @@ git -C <turso> apply <this repo>/harness/repro/mode-b-pager-pin.patch
 cd <turso>
 cargo test -p turso_core --lib probe_mode_b -- --nocapture --test-threads=1
 ```
+
+## sync-object-map-11501.patch
+
+The patch applies to turso main at `ae2cb7388`. It adds one test to
+`tests/integration/mvcc/database.rs`. The test builds the state of issue
+#11501: `sqlite_schema` has `t6` with `rootpage` 10 and `t7` with `rootpage`
+-10. It turns portable changes on, runs `INSERT INTO t6`, and decodes the
+object map of that commit frame. The test changes no engine code.
+
+| Test | Row | Expected | Actual on ae2cb7388 |
+|---|---|---|---|
+| `portable_object_map_names_the_written_table_when_a_temp_id_equals_its_page` | 26 | The object map of the commit names `t6` | The object map is `[{ mv_table_id: -10, name: "t7" }]`, so a push sends the row of `t6` as a row of `t7` |
+
+To run the test, use a turso checkout with no local changes:
+
+```bash
+git -C <turso> checkout ae2cb7388
+git -C <turso> apply <this repo>/harness/repro/sync-object-map-11501.patch
+cd <turso>
+cargo test -p core_tester --test integration_tests portable_object_map_names_the_written_table_when_a_temp_id_equals_its_page -- --nocapture
+```
+
+The test failed in 3 of 3 runs, with `left: "t7"` and `right: "t6"`.
+
+## sync-object-map-8004.patch
+
+The patch applies to turso main at `ae2cb7388`. It adds one test to
+`tests/integration/mvcc/database.rs`. The test pads the ids so that the
+temporary id of `t1` is not `-(its page)`. A passive checkpoint stops before
+its publish (a yield injector at `BeforePublishWindow`). `conn2` runs
+`BEGIN; CREATE TABLE t2(x)`. The checkpoint publishes the page of `t1` and
+stops again (`AfterDurableBoundaryAdvanced`). `conn2` commits and installs its
+old copy of the schema (#8004). The checkpoint finishes, and its GC drops the
+`sqlite_schema` versions of `t1`. Then three connections turn portable
+changes on and run `INSERT INTO t1`. The test changes no engine code.
+
+| Test | Row | Expected | Actual on ae2cb7388 |
+|---|---|---|---|
+| `portable_insert_after_stale_schema_install_and_catalog_gc` | 27 | Each `INSERT INTO t1` succeeds | `conn1`, `conn2` and a new `conn3` get `Corrupt("portable changes cannot resolve user data table id MVTableId(-4)")`. After one more checkpoint, a new connection succeeds |
+
+To run the test, use a turso checkout with no local changes:
+
+```bash
+git -C <turso> checkout ae2cb7388
+git -C <turso> apply <this repo>/harness/repro/sync-object-map-8004.patch
+cd <turso>
+cargo test -p core_tester --test integration_tests portable_insert_after_stale_schema_install_and_catalog_gc -- --nocapture
+```
+
+The test failed in 3 of 3 runs.

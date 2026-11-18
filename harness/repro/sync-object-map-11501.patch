@@ -1,0 +1,75 @@
+diff --git a/tests/integration/mvcc/database.rs b/tests/integration/mvcc/database.rs
+index d30ee11b2..95b555f4a 100644
+--- a/tests/integration/mvcc/database.rs
++++ b/tests/integration/mvcc/database.rs
+@@ -13392,3 +13392,70 @@ fn test_mvcc_portable_changes_resolve_user_table_after_cross_connection_checkpoi
+         "DML-only portable frame should resolve user table after cross-connection checkpoint"
+     );
+ }
++
++/// #11501 also breaks sync push. t7 gets the temporary id -P while it is not
++/// committed, and the passive checkpoint gives t6 the page P. A row of t6
++/// then carries the log id -P, and the object map of its commit resolves -P
++/// through `rootpage == -P` first, which is t7. The push sends the row of t6
++/// as a row of t7. The setup is the repro of issue #11501.
++#[cfg(feature = "conn_raw_api")]
++#[test]
++fn portable_object_map_names_the_written_table_when_a_temp_id_equals_its_page() {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let conn1 = db.connect();
++    conn1.execute("PRAGMA mvcc_checkpoint_threshold = -1").unwrap();
++    for sql in [
++        "CREATE TABLE t0(x)",
++        "INSERT INTO t0 VALUES (zeroblob(40000))",
++        "PRAGMA wal_checkpoint(TRUNCATE)",
++        "DROP TABLE t0",
++        "PRAGMA wal_checkpoint(TRUNCATE)",
++        "CREATE TABLE t1(x)",
++        "CREATE TABLE t2(x)",
++        "CREATE TABLE t3(x)",
++        "CREATE TABLE t4(x)",
++        "CREATE TABLE t5(x)",
++        "CREATE TABLE t6(x)",
++    ] {
++        conn1.execute(sql).unwrap();
++    }
++    let conn2 = db.connect();
++    conn2.execute("BEGIN").unwrap();
++    conn2.execute("CREATE TABLE t7(x)").unwrap();
++    conn1.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    conn2.execute("COMMIT").unwrap();
++
++    let roots = get_rows(
++        &conn1,
++        "SELECT name, rootpage FROM sqlite_schema WHERE type = 'table' AND rootpage != 0",
++    );
++    println!("sqlite_schema (name, rootpage): {roots:?}");
++    let root = |name: &str| {
++        roots
++            .iter()
++            .find(|row| row[0].to_string() == name)
++            .unwrap()[1]
++            .as_int()
++            .unwrap()
++    };
++    let (r6, r7) = (root("t6"), root("t7"));
++    assert_eq!(r7, -r6, "setup: t7's temporary id must be -(page of t6)");
++    // read_logical_replay_table_map keys this query by rootpage.unsigned_abs().
++    let same_stable_id: Vec<String> = roots
++        .iter()
++        .filter(|row| row[1].as_int().unwrap().unsigned_abs() == r6.unsigned_abs())
++        .map(|row| row[0].to_string())
++        .collect();
++    println!("tables with stable id {}: {same_stable_id:?}", r6.unsigned_abs());
++
++    conn1.set_portable_logical_changes_enabled(true);
++    conn1.execute("INSERT INTO t6 VALUES (1)").unwrap();
++    let txns = decode_portable_change_txns(&collect_mvcc_portable_change_bytes(&conn1));
++    let objects = &txns.last().unwrap().objects;
++    println!("object map of the commit of INSERT INTO t6: {objects:?}");
++    let entry = objects
++        .iter()
++        .find(|object| object.mv_table_id == -r6)
++        .expect("the object map has the log id of the row");
++    assert_eq!(entry.name, "t6", "the row of t6 must map to t6");
++}

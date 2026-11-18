@@ -1,0 +1,109 @@
+--- a/tests/integration/mvcc/database.rs
++++ b/tests/integration/mvcc/database.rs
+@@ -13392,3 +13392,106 @@
+         "DML-only portable frame should resolve user table after cross-connection checkpoint"
+     );
+ }
++
++/// #8004 also breaks sync push. A passive checkpoint stops before its publish.
++/// conn2 runs CREATE TABLE t2 and copies the schema, where t1 has no page
++/// yet. The checkpoint publishes the page of t1, and conn2 then commits and
++/// installs its old copy, so the shared schema keeps the temporary root of
++/// t1. By code reading, a connection that adopts this schema resolves the
++/// root of t1 but not the index from root to name
++/// (resolve_schema_negative_roots). The end of the same pass GCs the
++/// sqlite_schema versions of t1. With portable changes on, INSERT INTO t1
++/// writes the log id -page, the object map finds no table for it, and the
++/// commit fails with Corrupt.
++#[cfg(feature = "conn_raw_api")]
++#[test]
++fn portable_insert_after_stale_schema_install_and_catalog_gc() {
++    let db = MvccTestDbNoConn::new_with_random_db_passive();
++    let conn1 = db.connect();
++    let show = |at: &str| {
++        let schema = conn1.db.clone_schema();
++        let roots: Vec<_> = ["t1", "t2"]
++            .iter()
++            .map(|t| schema.get_btree_table(NamespaceId::ROOT, t).map(|b| b.root_page))
++            .collect();
++        let gc = db.get_mvcc_store().debug_gc_snapshot();
++        println!(
++            "{at}: shared schema roots t1,t2 = {roots:?}, store rows versions = {}",
++            gc.rows_versions,
++        );
++    };
++    conn1.execute("PRAGMA mvcc_checkpoint_threshold = -1").unwrap();
++    // Two dropped tables leave free pages and move the next temporary id
++    // below them, so the temporary id of t1 is not -(its page).
++    for sql in [
++        "CREATE TABLE pad1(x)",
++        "CREATE TABLE pad2(x)",
++        "PRAGMA wal_checkpoint(TRUNCATE)",
++        "DROP TABLE pad1",
++        "DROP TABLE pad2",
++        "PRAGMA wal_checkpoint(TRUNCATE)",
++    ] {
++        conn1.execute(sql).unwrap();
++    }
++    conn1.execute("CREATE TABLE t1(x)").unwrap();
++    conn1.execute("CREATE TABLE other(y)").unwrap();
++
++    // conn_c's commit runs a passive checkpoint.
++    let conn_c = db.connect();
++    conn_c.execute("PRAGMA mvcc_checkpoint_threshold = 0").unwrap();
++    let injector = FixedYieldInjector::new([
++        CheckpointYieldPoint::BeforePublishWindow.point(),
++        CheckpointYieldPoint::AfterDurableBoundaryAdvanced.point(),
++    ]);
++    conn_c.set_yield_injector(Some(injector.clone()));
++    let mut checkpoint = conn_c.prepare("INSERT INTO other VALUES (1)").unwrap();
++    let io = conn_c.get_pager().io.clone();
++    let mut step_until = |remaining: usize| {
++        for _ in 0..200_000 {
++            match checkpoint.step().unwrap() {
++                StepResult::IO | StepResult::Yield => {
++                    if injector.remaining_len() == remaining {
++                        return true;
++                    }
++                    io.step().unwrap();
++                }
++                StepResult::Done => return false,
++                other => panic!("unexpected checkpoint step: {other:?}"),
++            }
++        }
++        false
++    };
++    assert!(step_until(1), "the checkpoint must stop before its publish");
++    show("checkpoint stopped before publish");
++    let conn2 = db.connect();
++    conn2.execute("BEGIN").unwrap();
++    conn2.execute("CREATE TABLE t2(x)").unwrap();
++    assert!(step_until(0), "the checkpoint must stop after its publish");
++    show("checkpoint stopped after publish");
++    conn2.execute("COMMIT").unwrap();
++    show("after COMMIT of t2");
++    assert!(!step_until(usize::MAX), "the checkpoint must finish");
++    conn_c.set_yield_injector(None);
++    show("after the checkpoint finished");
++
++    let conn3 = db.connect();
++    let mut failures = Vec::new();
++    for (name, conn) in [("conn1", &conn1), ("conn2", &conn2), ("new conn3", &conn3)] {
++        conn.set_portable_logical_changes_enabled(true);
++        let result = conn.execute("INSERT INTO t1 VALUES (1)");
++        println!("{name}: INSERT INTO t1 -> {result:?}");
++        if result.is_err() {
++            failures.push(name);
++        }
++    }
++    // The next checkpoint publish patches the shared schema again.
++    conn3.execute("PRAGMA wal_checkpoint(PASSIVE)").unwrap();
++    show("after one more checkpoint");
++    let after = db.connect();
++    after.set_portable_logical_changes_enabled(true);
++    println!(
++        "new connection after one more checkpoint: INSERT INTO t1 -> {:?}",
++        after.execute("INSERT INTO t1 VALUES (2)")
++    );
++    assert!(failures.is_empty(), "INSERT INTO t1 failed on {failures:?}");
++}
