@@ -50,8 +50,8 @@ pub(super) struct RowDriver {
     /// commit timestamp.
     retiring: HashMap<i64, Writer>,
     /// Writers between `CommitEnd` and `FinalizeCommit` (spec `ending`), by
-    /// spec commit timestamp. They hold `Committed(end_ts)` in `txs` and
-    /// the pager commit lock.
+    /// spec commit timestamp. They hold `Committed(end_ts)` in `txs`. They
+    /// hold the pager commit lock only without group commit.
     ending: HashMap<i64, Writer>,
     /// Engine TxID of each spec commit timestamp.
     tx_ids: BTreeMap<i64, u64>,
@@ -286,8 +286,8 @@ impl RowDriver {
         let ts = step.pick("i").field("ts").int();
         assert!(
             !self.writers.values().any(|w| w.logged) && self.ending.is_empty(),
-            "two writers between log append and finish: the engine holds pager_commit_lock, \
-             and LogAppendOneAtATime of the spec rules this out"
+            "two writers between log append and finish: without group commit the engine holds \
+             pager_commit_lock, and LogAppendOneAtATime of the spec rules this out"
         );
         let writer = self.writers.get_mut(&ts).unwrap();
         writer.stop.set(

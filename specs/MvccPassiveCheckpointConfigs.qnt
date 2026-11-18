@@ -5756,12 +5756,14 @@ module reachRewriteStamped {
   ).* from "./MvccPassiveCheckpoint"
 }
 
-// Expect no error: with the pager commit lock held until FinalizeCommit, no
-// pass stamps inside the window.
-// Invariants: Safety
+// Expect NoStrandedVersions to fail: without group commit a writer takes end_ts
+// before BuildLogRecord and before the pager commit lock. Writer 1 (ts 10) can wait
+// there while writer 2 (ts 11) commits to the end, then a pass in the rewrite
+// window of writer 1 stamps its versions and the rewrite resets them. Needs two keys.
+// Invariants: NoStrandedVersions
 module rewriteSerialized {
   import MvccPassiveCheckpoint(
-    Keys = Set("k1"),
+    Keys = Set("k1", "k2"),
     Readers = Set("r1"),
     MaxTs = 5,
     FixRefuseCheckpointOwner = false,
@@ -5810,6 +5812,63 @@ module rewriteSerialized {
     GuardPruneReferenced = true,
     ModelCommitEndRewrite = true,
     RewriteResetsMat = true,
+    RemoveTxBeforeRewrite = false
+  ).* from "./MvccPassiveCheckpoint"
+}
+
+// Expect no error: same as rewriteSerialized, but the rewrite keeps the stamp.
+// Invariants: Safety
+module rewriteSerializedFixed {
+  import MvccPassiveCheckpoint(
+    Keys = Set("k1", "k2"),
+    Readers = Set("r1"),
+    MaxTs = 5,
+    FixRefuseCheckpointOwner = false,
+    Mode = "passive",
+    FixRecollectUnstamped = false,
+    SplitLogTruncate = false,
+    FixStampAtPagerCommit = false,
+    FixCleanupPublishes = false,
+    CheckpointFailures = false,
+    MaxCheckpoints = 1,
+    GuardSnapshotBelowPreparing = true,
+    GuardGcWaitsForReaders = true,
+    GuardDropCurrentOnlyWhenIdle = true,
+    GuardBackfillStopsAtReaders = true,
+    GcFloorRule = "code",
+    CheckpointOnReaderConnection = "none",
+    ReadLooksAtChainTwice = true,
+    Aborts = false,
+    GuardReadersAbortOnDependency = true,
+    AbortKeepsMaterialized = false,
+    DirtyKeys = true,
+    GuardMarkBeforeCommitEnd = true,
+    MaxMarkFailures = 1,
+    GuardFullScanUntilStampCovered = true,
+    GuardFullScanGenerationCas = true,
+    GcSamplesFirst = false,
+    GuardGcRechecksIdleLwm = true,
+    BackfillToLimit = false,
+    LogAppendOneAtATime = true,
+    WriterBeginTicks = false,
+    WritersPinMarks = false,
+    PagerPinsWithoutGate = false,
+    GuardB2KeepUncheckpointed = true,
+    GuardB2InBtree = true,
+    GuardB2Tombstone = true,
+    GuardB3InCkptMax = true,
+    GuardFallThroughCkptMax = true,
+    GuardFallThroughMark = true,
+    BlockingStampOrigin = false,
+    FixB2WaitsForPinned = false,
+    BlockingStopsAfterStamp = false,
+    BlockingFailTruncatesLog = false,
+    Updates = false,
+    GuardRule2Lwm = true,
+    ModelFinalizedPrune = false,
+    GuardPruneReferenced = true,
+    ModelCommitEndRewrite = true,
+    RewriteResetsMat = false,
     RemoveTxBeforeRewrite = false
   ).* from "./MvccPassiveCheckpoint"
 }

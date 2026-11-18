@@ -973,6 +973,8 @@ module MvccPassiveCheckpoint {
     val marks = Pinned.map(r => rd.get(r).mark)
                   .union(if (WritersPinMarks) inflight.map(i => i.mark) else Set())
                   .union(if (WritersPinMarks) fin.pins.map(p => p.mark) else Set())
+                  // A writer in the commit end window still holds its read mark.
+                  .union(if (WritersPinMarks) ending.map(e => e.i.mark) else Set())
     val limit = if (GuardBackfillStopsAtReaders) Min(marks.union(Set(wal.length())))
                 else wal.length()
     all {
