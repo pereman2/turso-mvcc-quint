@@ -149,6 +149,17 @@ The generation compare in `clear_checkpoint_full_scan` is also not needed in
 the row model (`dirtyNoGenerationCas`). Keep it for now, because the model
 does not cover the sequence path that also raises the generation.
 
+The referenced filter in `prune_finalized_tx_states` is redundant for safety
+(gap 6). Safety comes from the order: the engine rewrites every TxID marker
+before `remove_tx`. The model assumes this order, so `TxIdsResolve` and the
+filter-off pass (`finalizedNoReferenced`) hold by construction. The verdict
+rests on the source order (mod.rs:3652 and 3660 before 3698, mod.rs:7320
+before 7330, mod.rs:1951 before 1956, empty write sets at mod.rs:3303 and
+3377) plus the what-if controls. The what-if with `remove_tx` first breaks
+reads, even with the filter on. The filter only delays a prune. Do not delete it
+without an assertion that no mapped version names a finalized TxID at prune
+time.
+
 Step 3 can make several of these guards dead code.
 
 ### 6. One look at the chain for each read

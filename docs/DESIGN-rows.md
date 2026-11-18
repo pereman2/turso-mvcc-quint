@@ -178,6 +178,87 @@ the verdicts.
    `seqcompact_commit_delete` (mod.rs:9002) is a third source, and it is not in
    this model. Keep the check for that case.
 
+## Finalized TxID states
+
+A version stores the TxID of its writer until the writer commits. Then the
+engine rewrites each marker to a timestamp. After that the writer leaves
+`txs`, and `remove_tx` puts its state in `finalized_tx_states`
+(mod.rs:6823-6861). A prune drops entries that no chain names
+(`collect_referenced_txids`, `prune_finalized_tx_states`, mod.rs:8531-8561).
+A TxID that both maps have lost would make a read see a version as invisible
+(mod.rs:11291-11296) or ignore an end (mod.rs:11358-11362).
+
+`ModelFinalizedPrune` (off by default) adds this. `WriteFinish` becomes
+`CommitEnd` plus the rewrite and the publish, up to
+`BeforeFinishCommittedTx`. `WriteRemoveTx` is `remove_tx`. `FinPruneCollect`
+and `FinPruneApply` are the prune in two steps, and they can run at any time.
+`TxIdsResolve` says that no version names a TxID that both maps have lost.
+With the constant off, the model is the same, state for state.
+
+Two what-ifs test the order. `RemoveTxBeforeRewrite` lets `remove_tx` run
+before the rewrite (`WriteRewrite`). `GuardPruneReferenced` turns the
+referenced filter on or off.
+
+Results with one key, one reader, `MaxTs = 4` and one checkpoint:
+
+| Configuration | Filter | Order | Result |
+|---|---|---|---|
+| `finalizedMain` | on | rewrite first | No error, 3,071,602 states |
+| `finalizedNoReferenced` | off | rewrite first | No error, 1,709,056 states. Also no error at `MaxTs = 5` (15,360,546 states). Two readers at `MaxTs = 5` did not finish in 44 minutes |
+| `finalizedRemoveBeforeRewriteNoReferenced` | off | remove first | `TxIdsResolve` fails. This is the negative control |
+| `finalizedRemoveBeforeRewrite` | on | remove first | `ReadsCorrect` fails. The filter reads a set that is out of date |
+| `reachFinalizedPrune` | on | rewrite first | `NeverPrunesWithVersion` fails. This shows only that a prune runs while the writer's version still exists |
+| `reachFinalizedGuardFires` | on | rewrite first | `NeverPruneGuardFires` fails, so the filter is reached |
+
+In engine order the model assumes that the rewrite comes before `remove_tx`.
+So `TxIdsResolve` holds by construction, and the filter-off pass
+(`finalizedNoReferenced`) holds by construction too. Those passes do not test
+the filter. They show only that the new steps keep the other invariants.
+
+The redundancy verdict rests on the engine source order at rev 0c9fe0dd9, plus
+the what-if controls. The rewrite runs before `remove_tx` on every path:
+
+- The normal commit: `RewriteLiveVersions` at mod.rs:3652 and mod.rs:3660, before
+  `finish_committed_tx` at mod.rs:3698.
+- The dropped COMMIT: mod.rs:7320, before mod.rs:7330.
+- The abandoned group waiter: mod.rs:1951, before mod.rs:1956.
+- The fast paths at mod.rs:3303 and mod.rs:3377. The write set is empty, so
+  `remove_tx` inserts nothing (mod.rs:6831-6832).
+
+The what-if shows that a broken order breaks reads, even with the filter on.
+
+The code is safe because the rewrite comes before `remove_tx`. The filter is
+not the reason. It does not help when the order breaks, and it never protects
+a read when the order holds. It does fire in the engine order. A writer can be
+Preparing at the collect and leave `txs` before the apply. Then the filter
+keeps its TxID for one more round. This only delays the prune. The replay found
+this case, and the first version of the model missed it.
+
+`main` keeps its 17,344,980 states. The trace replay (`mbtFinalized`) conforms
+on 100 of 100 traces. A retiring writer keeps its WAL read mark until its statement
+ends. The COMMIT statement ends its pager read tx after `remove_tx`
+(connection.rs:4894-4897), and the passive backfill stops at every read mark that
+it cannot take (wal.rs:1209-1232). So `WritersPinMarks` keeps the mark of a writer in
+`fin.pins` from `WriteFinish` to `WriteRemoveTx`, and `CheckpointBackfill` reads it.
+An older spec dropped the mark at `WriteFinish`, and 1 to 3 percent of traces failed at
+`CheckpointBackfill`. The driver splits a commit only when the writer is in
+`fin.retiring`, and it checks the cache only in such traces. The check is that `finalized_tx_states` is a subset of the spec
+set. After `FinPruneApply` the sets are equal, unless a checkpoint finalized
+between the collect and the apply. The engine also prunes at `Finalize`
+(csm.rs:3535 and csm.rs:3543), and the spec does not.
+
+Left out:
+
+- `still_retiring`. The insert and the removal from `txs` are one step.
+- `rootpage_gc_protected`. It skips the collect, and the row spec has no root
+  pages.
+- Write-write conflict checks. A lost TxID gives "no conflict" (mod.rs:2215-2217).
+  Gap 7 models conflicts with timestamps, not with lost TxIDs. The order argument
+  below covers conflicts too, but nothing models a lost TxID in a conflict check.
+- The checkpoint `committed_ts` lookup of a lost TxID (csm.rs:1827-1838).
+- The prune only at `Finalize` and VACUUM. The model prunes at any time.
+- Writers of more than one row, rewrite chunks, mode B and index rows.
+
 ## Not modeled
 
 - Aborts of `Active` writers. Their versions are invisible to readers. Their

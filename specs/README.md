@@ -87,7 +87,6 @@ open reader, checkpoint passes that stop before they complete, and mode T.
   row. The index spec covers one row and one index in mode P
   (`DESIGN-indexes.md`).
 - Write-write validation against a GC that drops versions.
-- `finalized_tx_states` pruning.
 - Group commit in the row, schema and sequence specs, where the log append
   is one atomic step. `MvccGroupCommit.qnt` models it alone, with no
   checkpoint and no readers.
