@@ -1339,6 +1339,41 @@ module normalTwoCrashes {
   ).* from "./MvccRecovery"
 }
 
+// Expect no error for passive backfill capped at an intermediate WAL frame.
+// Invariants: TypeOK RunCorrect DbFileReadsCorrect NormalPrefix OpenSucceeds
+module normalPartialBackfill {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 3,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ) as Recovery from "./MvccRecovery"
+
+  action Init = Recovery::Init
+  action Next = Recovery::NextWithPartialBackfill
+  val TypeOK = Recovery::TypeOK
+  val RunCorrect = Recovery::RunCorrect
+  val DbFileReadsCorrect = Recovery::DbFileReadsCorrect
+  val NormalPrefix = Recovery::NormalPrefix
+  val OpenSucceeds = Recovery::OpenSucceeds
+}
+
 // Expect no error: as normalBackfillSkip, and the checkpoint pager commit
 // fsyncs the WAL also under NORMAL (FixCkCommitSyncsWal).
 // Invariants: TypeOK RunCorrect NormalPrefix

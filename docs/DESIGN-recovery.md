@@ -22,6 +22,8 @@ Turso main `172b828a9`. The repeated NORMAL crash profile uses `353713ec4`.
   reader can leave the range empty, or the backfill can return Busy. The
   checkpoint can finish without syncing the WAL or the database file
   (`wal.rs:5093`, `checkpoint.rs:3292-3309`).
+- `normalPartialBackfill` also lets a passive checkpoint copy a nonempty
+  prefix of the unbackfilled WAL. A read mark supplies the copy limit.
 - Since Turso `d52ed55ca`, a checkpoint proceeds from logical-log truncate
   to WAL cleanup after truncate completion. The log truncate changes the
   live image. A crash can keep that image or the prior synced one. If the
@@ -49,6 +51,7 @@ Turso main `172b828a9`. The repeated NORMAL crash profile uses `353713ec4`.
 | `fs.dbDisk`, `fs.metaDisk` | `.db` after fsync | `meta` is `persistent_tx_ts_max` |
 | `fs.wal` | `.db-wal` | During recovery between WAL truncate and fsync, `fs.wal` still holds the stable frames and the live WAL is empty |
 | `fs.walDisk` | `.db-wal` after fsync | The count of durable frames. A crash chooses the live or stable WAL image (`walMemKept`) |
+| `fs.walBase`, `fs.nBackfill` | WAL coordination in memory | The ordered position of frame 0 in the current generation and the published count of backfilled frames |
 | `hist`, `floor` | none (ghost state) | Under NORMAL only. `hist(t)` is the committed rows after timestamp t. `floor` is the newest timestamp that a WAL sync made durable or an open recovered |
 | `lg.file`, `lg.hfile` | `.db-log` as the OS shows it | `hfile` is `None` or `Valid` |
 | `lg.disk`, `lg.hdisk` | `.db-log` after fsync | `hdisk` can also be `Invalid` after a torn write |
@@ -71,13 +74,13 @@ header, the frame has `ok = false`. Replay stops before the first such frame.
 | `CkBegin` | collect states, `checkpoint_state_machine.rs:2488-2604` | The blocking kind waits for every transaction. The flag-on kinds do not take the lock before the snapshot |
 | `CkCommit` | `checkpoint_state_machine.rs:3241-3295`, `pager.rs:4776` | Pager commit of one WAL frame. An empty write set skips the pager commit and the publish (line 2643). The frame is durable (`walDisk`) under FULL, or under NORMAL with `FixCkCommitSyncsWal`, which also raises `floor` |
 | `CkPublish` | `apply_checkpoint_publish_window`, line 2188 | `durable_txid_max` advances. A separate step for a crash, an error or an abandoned checkpoint after the pager commit. Other connections can commit while the pager commit I/O completes. The passive retry on a busy publish flag (line 3299) cannot fire today: one flag-on checkpoint runs at a time (line 2488), and only it sets the flag (`mod.rs:7957`) |
-| `CkBackfill` | `wal.rs:5085-5122` | Syncs the WAL, then copies all its frames in one step. Under NORMAL a nonempty sync raises `floor` to the newest metadata timestamp covered by the sync |
+| `CkBackfill`, `CkBackfillPartial` | `wal.rs:5035-5122` | Any nonempty copy syncs the WAL file first. Under NORMAL that raises `floor` to the newest WAL metadata timestamp. The DB file gets only the eligible frames |
 | `CkBackfillNone` | `checkpoint.rs:3292-3309`, `wal.rs:5093` | With `PassiveBackfillSkips`, leaves the files and `floor` as they were and goes to `CkTruncLog`. Tags `BackfillSkipped` (WAL has frames) and `BackfillSkippedUnsynced` (some are not durable) |
-| `CkSyncDb` | `checkpoint_state_machine.rs:3409` | |
+| `CkSyncDb` | `checkpoint.rs:3330-3348` on `81efb0b7e` | Syncs the DB file and publishes the copied frame in one step |
 | `CkTruncLog` | `checkpoint.rs:3257-3279`, `logical_log.rs:1063-1100`, lock at `core/mvcc/persistent_storage/mod.rs:230` | Under the log lock: the decision, the truncate submit and the writer reset. The blocking kind clears the whole log (`clears_whole_logical_log`, line 1942). If one frame is above the snapshot, the flag-on kinds keep the log. The truncate only changes the live image |
 | `CkTruncDone` | `core/io/io_uring.rs:848` | Only with `AsyncLogTruncate`. The truncate completes later, and it can run after a newer append |
 | `CkTruncWal` | `checkpoint_state_machine.rs:3446` | The WAL truncate and its fsync, one step. The passive kind keeps the WAL |
-| `CkGc` | `gc_checkpointed_table_versions` (line 2252), then `Finalize` (line 3531) | Stamps only the write set (`stamp_chain_materialized`, `mod.rs:8651`), then runs `gc_version_chain` (`mod.rs:8581`) on every chain. The GC batches are one step |
+| `CkGc` | `checkpoint.rs:2167-2217`, `3437-3449` on `81efb0b7e` | Stamps the write set with the WAL position, then applies GC to every chain. The backfill floor limits which stamped versions GC can drop. The GC batches are one step |
 | `CkFail` | `cleanup_after_external_io_error` (`checkpoint_state_machine.rs:1039-1075`) | See below |
 | `Crash` | none | Keeps fsynced data. A crash can drop an unsynced write, keep it, or tear it. During recovery, an unsynced WAL truncate can survive or leave the old WAL in place |
 | `OpenStart` | `maybe_complete_interrupted_checkpoint_nonblock` (`mod.rs:9179`) | The startup decision. It keeps the open flag, whether the WAL had frames, and the header state in `op`. With no WAL frames, replay follows at once |
@@ -149,6 +152,8 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   refusals. The first one checks only files with WAL frames.
 - `RunCorrect`: while the system runs, reads give the committed rows. It is
   the run half of `RecoveryCorrect`, for NORMAL.
+- `DbFileReadsCorrect`: the current version chains and the durable DB file
+  together give the committed rows, even if the DB file stops before the WAL.
 - `NormalPrefix`: every successful NORMAL open gives the rows of a commit
   point `t` with `floor <= t <= clock`. Both read-only and read-write opens
   enter the check. The WAL sync in `CkBackfill` raises `floor` to the highest
@@ -159,7 +164,7 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   timestamp and rows projected from the files. Check that result before
   replay and across a crash that interrupts recovery. The next successful
   open must return the same timestamp and rows, even if the WAL is gone.
-- `NoLeak`: after a checkpoint succeeds, no chain is left whose every version
+- `NoLeak`: after a full-backfill checkpoint succeeds, no chain is left whose every version
   has its last event at or below the snapshot. GC runs with no open snapshot
   in the model, so the B-tree holds that row. After a blocking checkpoint with no
   failed pass before it, the store is empty (`DESIGN-rows.md`, "Mode B").
@@ -348,6 +353,40 @@ make variants SPECS=MvccRecovery ONLY=normalTwoCrashes
 quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
 ```
 
+## Partial passive backfill under NORMAL
+
+On Turso main `81efb0b7e`, a pinned read mark can cap the copy range below the
+WAL end (`wal.rs:1209-1232`, `5035-5081`). A nonempty copy syncs the whole
+WAL file (`wal.rs:5093-5104`, `5119-5122`). The checkpoint publishes only
+the copied frame after it syncs the DB file (`checkpoint.rs:3330-3348`).
+GC uses that frame as an upper bound on the versions it can drop
+(`checkpoint.rs:2152-2164`, `3392-3402`, `mod.rs:8706-8746`).
+
+With an insert at frame 1 and a delete at frame 2, a copy through frame 1
+leaves the row in the DB file. The synced WAL still holds the delete. GC
+keeps the in-memory delete so a read over the DB file can hide the row.
+A later full backfill lets GC drop the delete. After a crash, startup
+backfills the surviving WAL and skips old log records through metadata
+timestamp 2 (`mod.rs:9378-9398`, `9793-9795`, `9913`).
+
+The profile models the copy limit as a safe frame number. GC can run after
+the pin leaves, with no snapshot open. Each checkpoint pager commit is one
+model WAL frame, including its metadata. The positive profile checks
+`DbFileReadsCorrect` and the recovery invariants for read-write opens.
+The replays check power loss before the DB sync with a surviving log,
+power loss after the DB sync with the log lost, and GC after a later full
+backfill. The replays assert the recovered timestamp and exact chain.
+
+TLC checked 112,436 states in `normalPartialBackfill` without a violation.
+The two FULL and nine NORMAL replays passed on macOS. Replacing the GC
+cap with the WAL end caused the partial-backfill delete replay to fail.
+
+```sh
+cd specs
+make variants SPECS=MvccRecovery ONLY=normalPartialBackfill
+quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
+```
+
 ## What the model leaves out
 
 - Readers and snapshots. GC runs with `lwm = MAX`.
@@ -356,8 +395,8 @@ quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
 - Mixed sync modes per connection (`needs_full_sync`, `mod.rs:1957`).
 - A crash that keeps a middle part of the unsynced log or WAL. The model
   keeps none or all of it.
-- A partial backfill (some frames but not all). A skipped backfill stands for
-  a pinned reader or Busy, but the model has no reader.
+- Partial backfill in a failed TRUNCATE pass. The passive model abstracts
+  reader pins as copy limits. A skipped backfill stands for a pinned reader or Busy.
 - The commit-path GC (`gc_incremental`).
 - The header CRC retry at open and I/O errors at open.
 - More than one commit in flight.

@@ -76,9 +76,8 @@
  *
  * Not modeled: readers and snapshots (GC runs with lwm = MAX; a skipped
  * backfill stands for a pinned reader or Busy), schema and root pages,
- * indexes, aborts, SyncMode OFF, a partial backfill (some frames but not
- * all), mixed sync modes per connection, a crash that keeps a middle part
- * of the unsynced log or WAL (the model keeps none or all), the commit-path GC
+ * indexes, aborts, SyncMode OFF, mixed sync modes per connection, a crash that
+ * keeps a middle part of the unsynced log or WAL, the commit-path GC
  * (gc_incremental), the header CRC retry at open, I/O errors at open, and
  * more than one commit in flight.
  */
@@ -130,9 +129,9 @@ module MvccRecovery {
        b    begin timestamp, 0 for "begin None" (a tombstone over a B-tree row)
        e    end timestamp, Inf while current
        v    the row value, the commit timestamp of its write
-       mat  stamped with the WAL frame that holds it (materialized_at)
+       mat  WAL position of the terminal event, 0 when unstamped
        res  btree_resident */
-  type Ver = { b: int, e: int, v: int, mat: bool, res: bool }
+  type Ver = { b: int, e: int, v: int, mat: int, res: bool }
   // A log frame: one commit of one key. v = 0 deletes. prev: the row
   // existed before, so the frame also ends the old version. ok: recovery can
   // chain its CRC to the header.
@@ -151,12 +150,13 @@ module MvccRecovery {
   }
   // walDisk: the number of WAL frames that an fsync made durable. Under FULL
   // it equals wal.length().
-  type Files = { wal: List[WalFrame], walDisk: int, dbMem: str -> int,
+  // walBase: ordered position of frame 0 of this WAL generation.
+  type Files = { wal: List[WalFrame], walDisk: int, walBase: int, nBackfill: int, dbMem: str -> int,
                  dbDisk: str -> int, metaMem: int, metaDisk: int }
   // stage: "submitted", "appended" (write complete), "synced" (fsync done).
   type Inflight = { on: bool, rec: LogFrame, hdr: bool, stage: str }
   type Ck = { pc: str, kind: str, snap: int, wset: str -> int, clears: bool,
-              nonempty: bool }
+              nonempty: bool, copiedThrough: int }
   // An open in progress. walHad and hdrWas are the files at OpenStart.
   // crash names the last crash: "tornFirstAppend" when it tore the header of
   // a first append while the WAL had frames.
@@ -224,29 +224,31 @@ module MvccRecovery {
     val afterDel =
       if (not(r.prev)) chain
       else if (cur != Set())
-        chain.map(x => if (cur.contains(x)) { ...x, e: tsUsed } else x)
-      else chain.union(Set({ b: 0, e: tsUsed, v: 0, mat: false, res: true }))
+        chain.map(x => if (cur.contains(x)) { ...x, e: tsUsed, mat: 0 } else x)
+      else chain.union(Set({ b: 0, e: tsUsed, v: 0, mat: 0, res: true }))
     if (r.v == 0) afterDel
     else {
       // insert_version_raw keeps one version for one begin timestamp.
       afterDel.filter(x => not(x.b == tsUsed and x.b > 0))
-        .union(Set({ b: tsUsed, e: Inf, v: r.v, mat: false, res: false }))
+        .union(Set({ b: tsUsed, e: Inf, v: r.v, mat: 0, res: false }))
     }
 
   pure def terminal(x: Ver): int = if (x.e < Inf) x.e else x.b
 
-  pure def stamp(chain: Set[Ver], snap: int): Set[Ver] =
-    chain.map(x => if (terminal(x) <= snap) { ...x, mat: true } else x)
+  pure def stamp(chain: Set[Ver], snap: int, pos: int): Set[Ver] =
+    chain.map(x => if (terminal(x) <= snap) { ...x, mat: pos } else x)
 
   // gc_version_chain with lwm = MAX (no open snapshot).
-  pure def gcChain(chain: Set[Ver], ckptMax: int, passive: bool): Set[Ver] =
+  pure def gcChain(chain: Set[Ver], ckptMax: int, passive: bool, gcFloor: int): Set[Ver] =
+    val materialized = chain.filter(x => x.mat > 0 and x.mat <= gcFloor)
     val hasCurrent = chain.exists(x => x.b > 0 and x.e == Inf)
     val r2 = chain.filter(x =>
       if (x.e < Inf) {
-        if (passive) not(x.mat)
+        if (passive) not(materialized.contains(x))
         else x.e > ckptMax and (x.res or (x.b > 0 and x.b <= ckptMax) or not(hasCurrent))
       } else true)
-    val r3 = r2.filter(x => x.b > 0 and x.e == Inf and x.mat and (passive or x.b <= ckptMax))
+    val r3 = r2.filter(x =>
+      x.b > 0 and x.e == Inf and materialized.contains(x) and (passive or x.b <= ckptMax))
     if (r2.size() == 1 and r3.size() == 1) Set() else r2
 
   // The startup decision and the state that an uninterrupted recovery
@@ -294,9 +296,11 @@ module MvccRecovery {
 
   val btree: str -> int = applyFrames(fs.dbMem, fs.wal)
   val reads: str -> int = Keys.mapBy(k => readAt(store.get(k), btree.get(k), clock))
+  val walEnd: int = fs.walBase + fs.wal.length()
+  val backfillFloor: int = fs.walBase + fs.nBackfill
   val lastAcked: int = if (cm.on) clock - 1 else clock
   val ckIdle: Ck = { pc: "idle", kind: "", snap: 0, wset: Keys.mapBy(k => NotWritten),
-                     clears: false, nonempty: false }
+                     clears: false, nonempty: false, copiedThrough: 0 }
   val noOpen: OpenSt = { pc: "idle", f: false, walHad: false, hdrWas: "", crash: "",
                         expected: { ts: -1, rows: Keys.mapBy(k => 0) } }
 
@@ -325,8 +329,8 @@ module MvccRecovery {
     lg' = { file: List(), hfile: "None", disk: List(), hdisk: "None", off0: true,
             crcReset: false, maxApp: 0, truncPend: false, appSince: false,
             hdrFlight: false },
-    fs' = { wal: List(), walDisk: 0, dbMem: Keys.mapBy(k => 0), dbDisk: Keys.mapBy(k => 0),
-            metaMem: 0, metaDisk: 0 },
+    fs' = { wal: List(), walDisk: 0, walBase: 1, nBackfill: 0, dbMem: Keys.mapBy(k => 0),
+            dbDisk: Keys.mapBy(k => 0), metaMem: 0, metaDisk: 0 },
     cm' = { on: false, rec: { ts: 0, k: "", v: 0, prev: false, ok: true }, hdr: false,
             stage: "" },
     ck' = ckIdle,
@@ -437,7 +441,7 @@ module MvccRecovery {
     all {
       hist' = hist, floor' = floor,
       ck' = { pc: "commit", kind: kind, snap: snap, wset: wset, clears: false,
-              nonempty: changed != Set() },
+              nonempty: changed != Set(), copiedThrough: 0 },
       cnt' = { ...cnt, ck: cnt.ck + 1 },
       leakSnap' = -1,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
@@ -490,21 +494,32 @@ module MvccRecovery {
     }
   }
 
-  // Fsyncs the WAL, then copies every WAL frame into the DB file page cache
-  // (wal.rs:5119-5123, the SyncWal barrier comes first).
-  action CkBackfill = all {
+  // SyncWal flushes the file, even if a pinned read mark caps the copy.
+  action CkBackfillTo(upTo: int): bool = all {
     mode == "run",
     ck.pc == "backfill",
-    val boundary = lastMeta(fs.metaMem, fs.wal)
+    val copied = upTo > fs.nBackfill
+    val frames = fs.wal.slice(fs.nBackfill, upTo)
     all {
-      fs' = { ...fs, walDisk: fs.wal.length(), dbMem: applyFrames(fs.dbMem, fs.wal), metaMem: boundary },
-      ck' = { ...ck, pc: "syncdb" },
+      fs' = if (copied)
+              { ...fs, walDisk: fs.wal.length(), dbMem: applyFrames(fs.dbMem, frames),
+                metaMem: lastMeta(fs.metaMem, frames) }
+            else fs,
+      ck' = { ...ck, pc: if (copied) "syncdb" else "trunclog", copiedThrough: upTo },
       hist' = hist,
-      floor' = if (normal and fs.wal.length() > 0) maxI(floor, boundary) else floor,
+      floor' = if (normal and copied) maxI(floor, lastMeta(fs.metaMem, fs.wal)) else floor,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
     }
+  }
+
+  action CkBackfill = CkBackfillTo(fs.wal.length())
+
+  action CkBackfillPartial(upTo: int): bool = all {
+    ck.kind == "passive",
+    fs.nBackfill < upTo and upTo < fs.wal.length(),
+    CkBackfillTo(upTo),
   }
 
   // A passive backfill that copies no frame: a reader pins the WAL at
@@ -536,7 +551,7 @@ module MvccRecovery {
     ck.pc == "syncdb",
     all {
       hist' = hist, floor' = floor,
-      fs' = { ...fs, dbDisk: fs.dbMem, metaDisk: fs.metaMem },
+      fs' = { ...fs, dbDisk: fs.dbMem, metaDisk: fs.metaMem, nBackfill: ck.copiedThrough },
       ck' = { ...ck, pc: "trunclog" },
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
@@ -593,7 +608,8 @@ module MvccRecovery {
     mode == "run",
     ck.pc == "truncwal",
     all {
-      fs' = if (ck.kind == "passive") fs else { ...fs, wal: List(), walDisk: 0 },
+      fs' = if (ck.kind == "passive") fs
+            else { ...fs, wal: List(), walDisk: 0, walBase: walEnd + 1, nBackfill: 0 },
       ck' = { ...ck, pc: "gc" },
       hist' = hist, floor' = floor,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
@@ -609,13 +625,13 @@ module MvccRecovery {
     ck.pc == "gc",
     val stampAll = FixBlockingStoreEmpty and ck.kind != "passive"
     val stamped = Keys.mapBy(k =>
-      if (stampAll or ck.wset.get(k) != NotWritten) stamp(store.get(k), ck.snap)
-      else if (FixStampBelowBoundary) stamp(store.get(k), durable)
+      if (stampAll or ck.wset.get(k) != NotWritten) stamp(store.get(k), ck.snap, walEnd)
+      else if (FixStampBelowBoundary) stamp(store.get(k), durable, walEnd)
       else store.get(k))
     // A chain outside the write set that only a fix stamped.
     val fixUsed = Keys.exists(k => ck.wset.get(k) == NotWritten
                                    and stamped.get(k) != store.get(k))
-    val after = Keys.mapBy(k => gcChain(stamped.get(k), durable, flag))
+    val after = Keys.mapBy(k => gcChain(stamped.get(k), durable, flag, backfillFloor))
     all {
       store' = after,
       ck' = ckIdle,
@@ -713,7 +729,7 @@ module MvccRecovery {
       truth' = if (kept) truth.set(cm.rec.k, cm.rec.v) else truth,
       lg' = { file: frames, hfile: hd, disk: frames, hdisk: hd, off0: true, crcReset: false,
               maxApp: 0, truncPend: false, appSince: false, hdrFlight: false },
-      fs' = { ...fs, wal: wal2, walDisk: wal2.length(), dbMem: dbm, dbDisk: dbm,
+      fs' = { ...fs, wal: wal2, walDisk: wal2.length(), walBase: 1, nBackfill: 0, dbMem: dbm, dbDisk: dbm,
               metaMem: meta, metaDisk: meta },
       cm' = { ...cm, on: false, stage: "" },
       store' = Keys.mapBy(k => Set()),
@@ -738,8 +754,8 @@ module MvccRecovery {
     // restore max_appended_commit_ts.
     lg' = { ...lg, hfile: rb.hdr, hdisk: rb.hdr, off0: rb.hdr != "Valid", maxApp: 0,
             crcReset: false, truncPend: false, appSince: false, hdrFlight: false },
-    fs' = { wal: List(), walDisk: 0, dbMem: rb.db, dbDisk: rb.db, metaMem: rb.meta,
-            metaDisk: rb.meta },
+    fs' = { wal: List(), walDisk: 0, walBase: 1, nBackfill: 0, dbMem: rb.db, dbDisk: rb.db,
+            metaMem: rb.meta, metaDisk: rb.meta },
     op' = noOpen,
     replayTop' = rb.replayMax,
     leakSnap' = -1,
@@ -918,9 +934,16 @@ module MvccRecovery {
     OpenFinish,
   }
 
+  action NextWithPartialBackfill = any {
+    Next,
+    nondet upTo = fs.nBackfill.to(fs.wal.length()).oneOf()
+    CkBackfillPartial(upTo),
+  }
+
   // -------------------------------------------------------------- invariants
 
   val TypeOK: bool = Set("run", "open", "down").contains(mode) and clock <= MaxTs
+    and 0 <= fs.nBackfill and fs.nBackfill <= fs.walDisk and fs.walDisk <= fs.wal.length()
 
   // Every open the user can pick that succeeds gives the committed rows.
   // While the system runs, reads give the committed rows.
@@ -933,6 +956,10 @@ module MvccRecovery {
 
   // While the system runs, reads give the committed rows. Fine under NORMAL.
   val RunCorrect: bool = mode == "run" implies reads == truth
+
+  // The MVCC chain supplies any changes that the database file lacks.
+  val DbFileReadsCorrect: bool =
+    mode == "run" implies Keys.forall(k => readAt(store.get(k), fs.dbDisk.get(k), clock) == truth.get(k))
 
   // Under NORMAL a crash can lose acknowledged commits. An open that
   // succeeds still gives the rows of one commit point t, with floor <= t <=

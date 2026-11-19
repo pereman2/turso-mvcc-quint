@@ -57,9 +57,9 @@ module recoveryNormalTests {
   import MvccRecovery(
     Keys = Set("a"),
     MaxTs = 2,
-    MaxCheckpoints = 2,
+    MaxCheckpoints = 3,
     MaxCrashes = 2,
-    MaxFails = 0,
+    MaxFails = 1,
     InitFlag = true,
     OpenFlags = Set(false, true),
     OpenReadOnly = Set(false, true),
@@ -77,11 +77,13 @@ module recoveryNormalTests {
     FixCkCommitSyncsWal = false
   ).* from "./MvccRecovery"
 
-  action commitRow =
-    CommitWrite("a", false)
+  action commit(del: bool): bool =
+    CommitWrite("a", del)
       .then(CommitAppendDone)
       .then(CommitFsync)
       .then(CommitPublish)
+
+  action commitRow = commit(false)
 
   action commitCheckpoint =
     CkBegin("passive").then(CkCommit).then(CkPublish)
@@ -144,7 +146,59 @@ module recoveryNormalTests {
   action reopenRetainedLog =
     (if (fs.wal.length() > 0) OpenStart(false).then(finishOpen) else OpenStart(false))
       .expect(mode == "run" and fs.wal.length() == 0 and durable == 1
-        and replayTop == 2 and floor == 2 and reads.get("a") == 2)
+        and replayTop == 2 and floor == 2 and reads.get("a") == 2
+        and store.get("a") == Set(
+          { b: 0, e: 2, v: 0, mat: 0, res: true },
+          { b: 2, e: Inf, v: 2, mat: 0, res: false }))
+
+  action partialBackfill =
+    Init
+      .then(commitRow)
+      .then(commitCheckpoint)
+      .then(CkFail)
+      .then(commit(true))
+      .then(commitCheckpoint)
+      .expect(fs.wal.length() == 2 and fs.walDisk == 0 and durable == 2 and floor == 0)
+      .then(CkBackfillPartial(1))
+      .expect(fs.dbMem.get("a") == 1 and fs.metaMem == 1
+        and fs.metaDisk == 0 and fs.nBackfill == 0 and fs.walDisk == 2 and floor == 2)
+
+  action finishPartialBackfill =
+    partialBackfill
+      .then(CkSyncDb)
+      .then(finishCheckpoint)
+      .expect(fs.dbDisk.get("a") == 1 and fs.metaDisk == 1 and fs.nBackfill == 1
+        and store.get("a") == Set({ b: 1, e: 2, v: 1, mat: walEnd, res: false })
+        and DbFileReadsCorrect and reads.get("a") == 0)
+
+  action reopenPartialBackfill =
+    OpenStart(true)
+      .then(finishOpen)
+      .expect(clock == 2 and durable == 2 and floor == 2 and replayTop == 0
+        and fs.metaDisk == 2 and fs.wal.length() == 0 and fs.nBackfill == 0
+        and reads.get("a") == 0 and store.get("a") == Set())
+
+  run partialBackfillBeforeDbSyncTest =
+    partialBackfill
+      .then(Crash("mem", false, false))
+      .expect(fs.metaDisk == 0 and lg.disk.length() == 2 and NormalPrefix)
+      .then(reopenPartialBackfill)
+
+  run partialBackfillDropsUnsyncedLogTest =
+    finishPartialBackfill
+      .then(Crash("disk", false, false))
+      .expect(fs.metaDisk == 1 and fs.wal.length() == 2 and lg.disk.length() == 0 and NormalPrefix)
+      .then(reopenPartialBackfill)
+
+  run fullBackfillReclaimsPartialBackfillDeleteTest =
+    finishPartialBackfill
+      .then(CkBegin("passive"))
+      .then(CkCommit)
+      .then(CkBackfill)
+      .then(CkSyncDb)
+      .then(finishCheckpoint)
+      .expect(fs.nBackfill == 2 and fs.metaDisk == 2 and fs.dbDisk.get("a") == 0
+        and store.get("a") == Set() and DbFileReadsCorrect)
 
   run powerLossDropsWalTruncateTest =
     openBeforeWalSync
