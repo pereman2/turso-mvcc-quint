@@ -8,7 +8,7 @@ bugs where a database does not open.
 
 All paths in this document are relative to the repository root. Older line references
 are for Turso commit `7c607534b`. The sync and truncate changes use
-Turso main `172b828a9`.
+Turso main `172b828a9`. The repeated NORMAL crash profile uses `353713ec4`.
 
 ## Scope
 
@@ -47,8 +47,8 @@ Turso main `172b828a9`.
 |---|---|---|
 | `fs.dbMem`, `fs.metaMem` | `.db` in the page cache | A backfill writes here |
 | `fs.dbDisk`, `fs.metaDisk` | `.db` after fsync | `meta` is `persistent_tx_ts_max` |
-| `fs.wal` | `.db-wal` | The WAL truncate and its fsync are one step |
-| `fs.walDisk` | `.db-wal` after fsync | The number of frames that an fsync made durable. Equals `wal.length()` under FULL. A crash keeps all frames or only these (`walKept`) |
+| `fs.wal` | `.db-wal` | During recovery between WAL truncate and fsync, `fs.wal` still holds the stable frames and the live WAL is empty |
+| `fs.walDisk` | `.db-wal` after fsync | The count of durable frames. A crash chooses the live or stable WAL image (`walMemKept`) |
 | `hist`, `floor` | none (ghost state) | Under NORMAL only. `hist(t)` is the committed rows after timestamp t. `floor` is the newest timestamp that a WAL sync made durable or an open recovered |
 | `lg.file`, `lg.hfile` | `.db-log` as the OS shows it | `hfile` is `None` or `Valid` |
 | `lg.disk`, `lg.hdisk` | `.db-log` after fsync | `hdisk` can also be `Invalid` after a torn write |
@@ -79,11 +79,12 @@ header, the frame has `ok = false`. Replay stops before the first such frame.
 | `CkTruncWal` | `checkpoint_state_machine.rs:3446` | The WAL truncate and its fsync, one step. The passive kind keeps the WAL |
 | `CkGc` | `gc_checkpointed_table_versions` (line 2252), then `Finalize` (line 3531) | Stamps only the write set (`stamp_chain_materialized`, `mod.rs:8651`), then runs `gc_version_chain` (`mod.rs:8581`) on every chain. The GC batches are one step |
 | `CkFail` | `cleanup_after_external_io_error` (`checkpoint_state_machine.rs:1039-1075`) | See below |
-| `Crash` | none | Keeps fsynced data. An unsynced write is lost, kept, or torn. `walKept` keeps the unsynced WAL frames or drops them (allowed only when some frame is unsynced) |
+| `Crash` | none | Keeps fsynced data. A crash can drop an unsynced write, keep it, or tear it. During recovery, an unsynced WAL truncate can survive or leave the old WAL in place |
 | `OpenStart` | `maybe_complete_interrupted_checkpoint_nonblock` (`mod.rs:9179`) | The startup decision. It keeps the open flag, whether the WAL had frames, and the header state in `op`. With no WAL frames, replay follows at once |
 | `OpenBackfill`, `OpenSyncDb` | `mod.rs:9278`, `mod.rs:9295` | |
 | `OpenHeader`, `OpenFsyncLog` | `mod.rs:9341`, `mod.rs:9372` | A crash can tear a new header. A valid header is written again with the same bytes (`mod.rs:9228`, `logical_log.rs:988`), so the model does not tear it |
-| `OpenFinish` | `mod.rs:9404`, then `maybe_recover_logical_log` (`mod.rs:9609`) | WAL truncate, then replay |
+| `OpenTruncWal`, `OpenSyncWal` | `mod.rs:9450-9464`, `wal.rs:5423-5452` on `353713ec4` | Truncate then sync the WAL after the DB and log syncs |
+| `OpenFinish` | `mod.rs:9746-9778` on `353713ec4` | Replay after WAL fsync. A crash during replay has the same files as a crash just before it |
 
 `CkFail` stops a checkpoint at one of the steps from `CkCommit` to
 `CkTruncWal`. It stands for an error, `Busy`, or a checkpoint that a caller
@@ -119,11 +120,12 @@ The open follows the code in this order.
    reconcile interrupted MVCC checkpoint in read-only mode" (`mod.rs:9222`).
 2. If the WAL has frames, the header is `None` and the passive flag is off,
    refuse with "WAL has committed frames but logical log header is missing"
-   (`mod.rs:9237`). PR #9770 removes this refusal (`Fix9770`).
+   on older Turso revisions (`mod.rs:9237`). Current Turso main accepts this
+   state with either flag (`085e28f69`, `Fix9770`).
 3. If the WAL has frames and the header is `Invalid`, refuse (`mod.rs:9247`).
 4. If the WAL has frames, backfill them, fsync the DB file, write a fresh log
-   header, fsync the log and truncate the WAL. Each is its own step, and a
-   crash can come between any two.
+   header, fsync the log, truncate the WAL and fsync it. Each is its own step.
+   A crash can come between any two.
 5. If the header is `Invalid` now, refuse with "Logical log header corrupt and
    no WAL recovery available" (`mod.rs:9633`).
 6. Replay the frames with `commit_ts > persistent_tx_ts_max`
@@ -153,6 +155,10 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   timestamp it covers. In the hypothetical pager sync control, `CkCommit`
   raises it too. The upper bound includes a commit in flight. When recovery
   finishes, `GoRun` resets `truth`, `hist` and `floor` to the recovered state.
+- `NormalRecoveryStable`: at the first WAL-backed NORMAL open, save the
+  timestamp and rows projected from the files. Check that result before
+  replay and across a crash that interrupts recovery. The next successful
+  open must return the same timestamp and rows, even if the WAL is gone.
 - `NoLeak`: after a checkpoint succeeds, no chain is left whose every version
   has its last event at or below the snapshot. GC runs with no open snapshot
   in the model, so the B-tree holds that row. After a blocking checkpoint with no
@@ -312,6 +318,33 @@ a pinned reader and NORMAL with backfill.
 cd specs
 make recovery
 quint test RecoveryTests.qnt --main recoveryFullTests --max-samples 1
+quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
+```
+
+## Repeated NORMAL power loss
+
+`normalTwoCrashes` allows two power losses, two checkpoint passes and one row
+key. Commit timestamps are bounded at 2. The profile checks `NormalPrefix`
+and `NormalRecoveryStable` for read-write opens with either passive flag.
+`OpenSucceeds` checks availability when the files still match the last
+acknowledged rows. `RunCorrect` checks reads after recovery.
+
+The profile uses full backfill. A skipped backfill after a successful open
+can leave an unsynced WAL and an unsynced truncate of a previously durable
+log. Their persistence order remains open in gap 19 and FINDINGS row 29.
+
+The replay starts with commit 1 in the WAL and both commits in the log.
+Recovery syncs the DB at commit 1. Before WAL fsync, a second power loss can
+leave either one WAL frame or none. After WAL fsync it leaves none. All three
+reopens skip log commit 1 and recover row 2. A fourth replay opens at commit
+1, loses a new NORMAL commit, and opens again at the same durability floor.
+
+TLC checked 216,064 states in `normalTwoCrashes` without a violation. The
+two FULL and six NORMAL deterministic replays passed on macOS.
+
+```sh
+cd specs
+make variants SPECS=MvccRecovery ONLY=normalTwoCrashes
 quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
 ```
 

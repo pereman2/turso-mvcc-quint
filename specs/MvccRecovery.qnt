@@ -25,8 +25,8 @@
  *                 page cache (dbMem) and the fsynced copy (dbDisk) differ
  *                 between a backfill and its fsync.
  *   WAL           Frames written by checkpoints. walDisk counts the frames
- *                 that an fsync made durable. The WAL truncate and its
- *                 fsync are one step.
+ *                 that an fsync made durable. Recovery can stop between
+ *                 truncating and syncing the WAL.
  *   Logical log   A header (None, Valid or Invalid) and one frame for each
  *                 commit. `file` is what the OS shows, `disk` is what an
  *                 fsync made durable. A frame that recovery cannot chain to
@@ -56,7 +56,7 @@
  *   Open         OpenStart decides to refuse or to continue, with two flags:
  *                the passive flag and read-only. Then the durable steps of
  *                recovery: backfill, DB fsync, header write, log fsync, and
- *                WAL truncate with replay. A crash can stop recovery.
+ *                WAL truncate, WAL fsync, and replay. A crash can stop recovery.
  *
  * Invariants.
  *   RecoveryCorrect  Every open that succeeds gives the committed rows, and
@@ -68,6 +68,8 @@
  *   NormalPrefix     Under NORMAL, every open that succeeds gives the rows of
  *                    one commit point between `floor` (the newest point that
  *                    the engine promised durable) and the last commit.
+ *   NormalRecoveryStable  A successful retry of an interrupted NORMAL open
+ *                    recovers the same timestamp and rows as the first open projected.
  *   NoLeak           After a checkpoint succeeds, the store keeps no chain
  *                    that the B-tree already holds in full. After a blocking
  *                    checkpoint, the store is empty.
@@ -107,9 +109,9 @@ module MvccRecovery {
   // core/mvcc/database/checkpoint.rs:3306-3322).
   const PassiveBackfillSkips: bool
 
-  // Fixes and design ideas. false in the code today.
+  // Behavior switches and design ideas.
   const Fix9770: bool            // PR #9770: WAL frames + no log header
-                                 // completes the checkpoint with the flag off.
+                                 // completes the checkpoint with the flag off (on current main).
   const FixBlockingStoreEmpty: bool // After a blocking checkpoint, stamp every
                                  // chain, so its GC empties the store.
   const RecoveryOneTs: bool      // Idea 1: replay gives every replayed
@@ -158,7 +160,9 @@ module MvccRecovery {
   // An open in progress. walHad and hdrWas are the files at OpenStart.
   // crash names the last crash: "tornFirstAppend" when it tore the header of
   // a first append while the WAL had frames.
-  type OpenSt = { pc: str, f: bool, walHad: bool, hdrWas: str, crash: str }
+  type RecoveryPoint = { ts: int, rows: str -> int }
+  type OpenSt = { pc: str, f: bool, walHad: bool, hdrWas: str, crash: str,
+                  expected: RecoveryPoint }
   type Counters = { ck: int, crash: int, fail: int }
   type Rebuild = { ok: bool, why: str, db: str -> int, meta: int, hdr: str,
                    chains: str -> Set[Ver], clock: int, replayMax: int }
@@ -293,7 +297,8 @@ module MvccRecovery {
   val lastAcked: int = if (cm.on) clock - 1 else clock
   val ckIdle: Ck = { pc: "idle", kind: "", snap: 0, wset: Keys.mapBy(k => NotWritten),
                      clears: false, nonempty: false }
-  val noOpen: OpenSt = { pc: "idle", f: false, walHad: false, hdrWas: "", crash: "" }
+  val noOpen: OpenSt = { pc: "idle", f: false, walHad: false, hdrWas: "", crash: "",
+                        expected: { ts: -1, rows: Keys.mapBy(k => 0) } }
 
   def openOutcome(f: bool, ro: bool): Rebuild =
     rebuild(f, ro, Fix9770, RecoveryOneTs, false, Keys, fs.wal, lg.hdisk, lg.disk,
@@ -664,13 +669,12 @@ module MvccRecovery {
   // logPick: "disk" keeps the fsynced log, "mem" keeps every write, "torn"
   // tears the unsynced write. dbMemKept: the DB file keeps the page cache,
   // or only the fsynced pages.
-  // walKept: the WAL keeps its unsynced frames, or only the fsynced ones.
-  // With no unsynced frame both choices agree, so walKept needs one.
-  action Crash(logPick: str, dbMemKept: bool, walKept: bool): bool = all {
-    walKept implies fs.walDisk < fs.wal.length(),
+  // walMemKept selects the live WAL image over the last synced image.
+  action Crash(logPick: str, dbMemKept: bool, walMemKept: bool): bool = all {
     mode == "run" or mode == "open",
     cnt.crash < MaxCrashes,
     not(CrashOnlyWhenIdle) or (mode == "run" and not(cm.on) and ck.pc == "idle"),
+    val walTruncatePending = op.pc == "syncwal"
     val writeOpen = cm.on and not(hasFrame(lg.disk, cm.rec))
     val tornHdr = logPick == "torn" and ((writeOpen and cm.hdr) or lg.hdrFlight)
     val frames = if (logPick == "mem") lg.file
@@ -685,7 +689,9 @@ module MvccRecovery {
     val kept = cm.on and hd == "Valid" and hasFrame(validPrefix(frames), cm.rec)
     val dbm = if (dbMemKept) fs.dbMem else fs.dbDisk
     val meta = if (dbMemKept) fs.metaMem else fs.metaDisk
-    val wal2 = if (walKept) fs.wal else fs.wal.slice(0, fs.walDisk)
+    val wal2 = if (not(walMemKept)) fs.wal.slice(0, fs.walDisk)
+               else if (walTruncatePending) List()
+               else fs.wal
     val lostAcked = lg.file.select(r => r.ts <= lastAcked and not(hasFrame(lg.disk, r))).length() > 0
     val tornFirstAppend = tornHdr and writeOpen and cm.hdr and fs.wal.length() > 0
     val tags = Set()
@@ -694,12 +700,14 @@ module MvccRecovery {
                Set("CrashBlockingTruncWal") else Set())
       .union(if (not(cm.on) and ck.pc == "idle" and mode == "run") Set("CleanClose") else Set())
       .union(if (fs.wal.length() > 0 and hd == "None") Set("WalFramesNoLog") else Set())
-      .union(if (normal and logPick == "disk" and (lostAcked or wal2.length() < fs.wal.length()))
+      .union(if (normal and logPick == "disk"
+                 and (lostAcked or (not(walTruncatePending) and wal2.length() < fs.wal.length())))
                Set("LostUnsynced") else Set())
-      .union(if (mode == "open" and Set("fsynclog", "truncwal").contains(op.pc))
+      .union(if (mode == "open" and Set("fsynclog", "truncwal", "syncwal", "replay").contains(op.pc))
                Set("CrashInRecovery") else Set())
     all {
       hist' = hist, floor' = floor,
+      walMemKept implies (fs.walDisk < fs.wal.length() or walTruncatePending),
       logPick != "torn" or writeOpen or lg.hdrFlight,
       mode' = "down",
       truth' = if (kept) truth.set(cm.rec.k, cm.rec.v) else truth,
@@ -710,7 +718,8 @@ module MvccRecovery {
       cm' = { ...cm, on: false, stage: "" },
       store' = Keys.mapBy(k => Set()),
       ck' = ckIdle,
-      op' = { ...noOpen, crash: if (tornFirstAppend) "tornFirstAppend" else "other" },
+      op' = { ...noOpen, crash: if (tornFirstAppend) "tornFirstAppend" else "other",
+              expected: op.expected },
       cnt' = { ...cnt, crash: cnt.crash + 1 },
       leakSnap' = -1,
       seen' = seen.union(tags),
@@ -752,6 +761,9 @@ module MvccRecovery {
     OpenReadOnly.contains(false),
     val rb = openOutcome(f, false)
     val walHas = fs.wal.length() > 0
+    val expected = if (normal and op.expected.ts < 0)
+                     { ts: rb.clock, rows: rebuildReads(rb, Keys) }
+                   else op.expected
     val tags = Set(if (f) "OpenFlagOn" else "OpenFlagOff")
       .union(if (lg.disk.select(r => r.ts > rb.meta).length() > 1) Set("ReplayMany") else Set())
     all {
@@ -759,7 +771,8 @@ module MvccRecovery {
       if (walHas) all {
         hist' = hist, floor' = floor,
         mode' = "open",
-        op' = { ...op, pc: "backfill", f: f, walHad: walHas, hdrWas: lg.hdisk },
+        op' = { ...op, pc: "backfill", f: f, walHad: walHas, hdrWas: lg.hdisk,
+                expected: expected },
         seen' = seen.union(tags),
         flag' = flag, clock' = clock, truth' = truth, store' = store, durable' = durable,
         lg' = lg, fs' = fs, cm' = cm, ck' = ck, cnt' = cnt, leakSnap' = leakSnap,
@@ -831,13 +844,32 @@ module MvccRecovery {
     }
   }
 
-  // WAL truncate and fsync (mod.rs:9404), then replay of the log
-  // (maybe_recover_logical_log, mod.rs:9609). Replay writes no file.
-  action OpenFinish = all {
+  // Until WAL fsync, fs.wal holds the frames a power loss can bring back.
+  action OpenTruncWal = all {
     mode == "open",
     op.pc == "truncwal",
-    val rb = rebuild(op.f, false, Fix9770, RecoveryOneTs, false, Keys, List(), lg.hdisk,
-                     lg.disk, fs.dbDisk, fs.metaDisk)
+    op' = { ...op, pc: "syncwal" },
+    mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
+    durable' = durable, lg' = lg, fs' = fs, cm' = cm, ck' = ck, cnt' = cnt,
+    leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
+    hist' = hist, floor' = floor,
+  }
+
+  action OpenSyncWal = all {
+    mode == "open",
+    op.pc == "syncwal",
+    fs' = { ...fs, wal: List(), walDisk: 0 },
+    op' = { ...op, pc: "replay" },
+    mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
+    durable' = durable, lg' = lg, cm' = cm, ck' = ck, cnt' = cnt,
+    leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
+    hist' = hist, floor' = floor,
+  }
+
+  action OpenFinish = all {
+    mode == "open",
+    op.pc == "replay",
+    val rb = openOutcome(op.f, false)
     // A repair: the open started on WAL frames with no log header, and it
     // ends with the WAL removed and the committed rows.
     val repaired = op.walHad and op.hdrWas == "None" and rebuildReads(rb, Keys) == truth
@@ -873,14 +905,16 @@ module MvccRecovery {
     CkFail,
     nondet logPick = Set("disk", "mem", "torn").oneOf()
     nondet dbMemKept = Bool.oneOf()
-    nondet walKept = Bool.oneOf()
-    Crash(logPick, dbMemKept, walKept),
+    nondet walMemKept = Bool.oneOf()
+    Crash(logPick, dbMemKept, walMemKept),
     nondet f = Bool.oneOf()
     OpenStart(f),
     OpenBackfill,
     OpenSyncDb,
     OpenHeader,
     OpenFsyncLog,
+    OpenTruncWal,
+    OpenSyncWal,
     OpenFinish,
   }
 
@@ -911,6 +945,18 @@ module MvccRecovery {
       rb.ok implies
         hist.keys().exists(t => t >= floor and t <= clock
                                 and hist.get(t) == rebuildReads(rb, Keys))))
+
+  def matchesRecoveryPoint(rb: Rebuild): bool =
+    rb.clock == op.expected.ts and rebuildReads(rb, Keys) == op.expected.rows
+
+  val NormalRecoveryStable: bool =
+    if (op.expected.ts < 0) true
+    else if (mode == "open") {
+      val rb = openOutcome(op.f, false)
+      rb.ok and matchesRecoveryPoint(rb)
+    } else OpenFlags.forall(f => OpenReadOnly.forall(ro =>
+      val rb = openOutcome(f, ro)
+      rb.ok implies matchesRecoveryPoint(rb)))
 
   // Refusals that RECOVERY_SEMANTICS.md states as intended.
   pure val StatedRefusals = Set("case3", "case5")

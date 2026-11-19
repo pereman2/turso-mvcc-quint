@@ -1312,6 +1312,33 @@ module normalBackfillSkip {
   ).* from "./MvccRecovery"
 }
 
+// Expect no error with two NORMAL crashes and full backfill.
+// Invariants: TypeOK RunCorrect NormalPrefix NormalRecoveryStable OpenSucceeds
+module normalTwoCrashes {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 2,
+    MaxCrashes = 2,
+    MaxFails = 0,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
 // Expect no error: as normalBackfillSkip, and the checkpoint pager commit
 // fsyncs the WAL also under NORMAL (FixCkCommitSyncsWal).
 // Invariants: TypeOK RunCorrect NormalPrefix
