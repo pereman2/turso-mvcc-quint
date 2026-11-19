@@ -1374,6 +1374,82 @@ module normalPartialBackfill {
   val OpenSucceeds = Recovery::OpenSucceeds
 }
 
+// Expect no error under FULL with a user reader and passive checkpoint.
+// Invariants: TypeOK RecoveryCorrect DbFileReadsCorrect OpenSucceeds ReaderSnapshotCorrect ReaderPinCorrect ReaderLifecycleCorrect
+module fullWithReader {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ) as Recovery from "./MvccRecovery"
+
+  action Init = Recovery::Init
+  action Next = Recovery::NextWithReader
+  val TypeOK = Recovery::TypeOK
+  val RecoveryCorrect = Recovery::RecoveryCorrect
+  val DbFileReadsCorrect = Recovery::DbFileReadsCorrect
+  val OpenSucceeds = Recovery::OpenSucceeds
+  val ReaderSnapshotCorrect = Recovery::ReaderSnapshotCorrect
+  val ReaderPinCorrect = Recovery::ReaderPinCorrect
+  val ReaderLifecycleCorrect = Recovery::ReaderLifecycleCorrect
+}
+
+// Expect no error under NORMAL with a user reader and passive checkpoint.
+// Invariants: TypeOK RunCorrect DbFileReadsCorrect NormalPrefix NormalRecoveryStable OpenSucceeds ReaderSnapshotCorrect ReaderPinCorrect ReaderLifecycleCorrect
+module normalWithReader {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ) as Recovery from "./MvccRecovery"
+
+  action Init = Recovery::Init
+  action Next = Recovery::NextWithReader
+  val TypeOK = Recovery::TypeOK
+  val RunCorrect = Recovery::RunCorrect
+  val DbFileReadsCorrect = Recovery::DbFileReadsCorrect
+  val NormalPrefix = Recovery::NormalPrefix
+  val NormalRecoveryStable = Recovery::NormalRecoveryStable
+  val OpenSucceeds = Recovery::OpenSucceeds
+  val ReaderSnapshotCorrect = Recovery::ReaderSnapshotCorrect
+  val ReaderPinCorrect = Recovery::ReaderPinCorrect
+  val ReaderLifecycleCorrect = Recovery::ReaderLifecycleCorrect
+}
+
 // Expect no error: as normalBackfillSkip, and the checkpoint pager commit
 // fsyncs the WAL also under NORMAL (FixCkCommitSyncsWal).
 // Invariants: TypeOK RunCorrect NormalPrefix

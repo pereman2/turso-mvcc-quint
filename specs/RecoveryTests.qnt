@@ -233,3 +233,220 @@ module recoveryNormalTests {
       .then(OpenStart(true))
       .expect(floor == 1 and reads.get("a") == 1)
 }
+
+module recoveryFullReaderTests {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 3,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(false, true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive", "blocking"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+
+  action commit(del: bool): bool =
+    CommitWrite("a", del).then(CommitAppendDone).then(CommitFsync).then(CommitPublish)
+
+  action writeCheckpoint = CkBegin("passive").then(CkCommit).then(CkPublish)
+
+  action finishCheckpoint = CkTruncLog.then(CkTruncWal).then(CkGc)
+
+  action emptyCheckpoint = CkBegin("passive").then(CkCommit).then(CkBackfill)
+
+  run walPinRetainsLogForReopenTest =
+    Init
+      .then(commit(false))
+      .then(writeCheckpoint)
+      .then(CkFail)
+      .then(ReaderPin)
+      .then(ReaderBegin)
+      .expect(not(reader.dbFile) and reader.mark == 2
+        and reader.snapshot == { ts: 1, rows: Map("a" -> 1) })
+      .then(commit(true))
+      .then(writeCheckpoint)
+      .expect(clock == 2 and reads.get("a") == 0 and readerReads.get("a") == 1)
+      .then(CkBackfill)
+      .expect(fs.metaMem == 1 and fs.dbMem.get("a") == 1 and fs.metaDisk == 0
+        and fs.nBackfill == 0 and ck.copiedThrough == 1 and fs.walDisk == 2)
+      .then(CkSyncDb)
+      .then(commit(false))
+      .then(finishCheckpoint)
+      .expect(fs.metaDisk == 1 and fs.dbDisk.get("a") == 1 and fs.nBackfill == 1
+        and lg.file.foldl(List(), (times, r) => times.append(r.ts)) == List(1, 2, 3)
+        and readerReads.get("a") == 1 and readerLwm == 1 and readerGcFloor == 2
+        and reads.get("a") == 3 and store.get("a") == Set(
+          { b: 1, e: 2, v: 1, mat: 3, res: false },
+          { b: 3, e: Inf, v: 3, mat: 0, res: false }))
+      .then(Crash("disk", false, false))
+      .expect(reader == readerIdle and not(seen.contains("CleanClose"))
+        and fs.metaDisk == 1 and fs.wal.length() == 2 and lg.disk == lg.file
+        and lg.disk.length() == 3 and store.get("a") == Set())
+      .then(OpenStart(true))
+      .expect(reader == readerIdle and mode == "open")
+      .then(OpenBackfill.then(OpenSyncDb).then(OpenHeader).then(OpenFsyncLog)
+        .then(OpenTruncWal).then(OpenSyncWal).then(OpenFinish))
+      .expect(reader == readerIdle and clock == 3 and durable == 2 and replayTop == 3
+        and fs.dbDisk.get("a") == 0 and fs.wal.length() == 0 and reads.get("a") == 3
+        and store.get("a") == Set({ b: 3, e: Inf, v: 3, mat: 0, res: false }))
+      .then(ReaderPin)
+      .then(ReaderBegin)
+      .expect(reader.dbFile and reader.mark == 1 and readerBtree.get("a") == 0
+        and reader.snapshot == { ts: 3, rows: Map("a" -> 3) } and readerReads.get("a") == 3)
+
+  run dbFilePinPrecedesNewSnapshotTest =
+    Init
+      .then(commit(false))
+      .then(writeCheckpoint)
+      .then(CkBackfill.then(CkSyncDb).then(finishCheckpoint))
+      .expect(fs.nBackfill == 1 and store.get("a") == Set())
+      .then(ReaderPin)
+      .expect(reader.phase == "pinned" and reader.dbFile and reader.mark == 2
+        and reader.snapshot.ts == -1 and readerLwm == Inf and readerBtree.get("a") == 1)
+      .then(commit(false))
+      .then(writeCheckpoint)
+      .then(CkBackfill)
+      .expect(ck.pc == "trunclog" and walEnd == 3 and fs.nBackfill == 1
+        and fs.metaMem == 1 and fs.metaDisk == 1 and fs.dbDisk.get("a") == 1)
+      .then(finishCheckpoint)
+      .expect(readerGcFloor == 2 and store.get("a") == Set(
+        { b: 0, e: 2, v: 0, mat: 3, res: true },
+        { b: 2, e: Inf, v: 2, mat: 3, res: false }))
+      .then(ReaderBegin)
+      .expect(reader.snapshot == { ts: 2, rows: Map("a" -> 2) } and reader.mark == 2
+        and readerBtree.get("a") == 1 and readerReads.get("a") == 2)
+      .then(ReaderEnd)
+      .then(emptyCheckpoint.then(CkSyncDb).then(finishCheckpoint))
+      .expect(reader == readerIdle and fs.nBackfill == 2 and fs.dbDisk.get("a") == 2
+        and store.get("a") == Set())
+
+  run registeredSnapshotKeepsLastCurrentVersionTest =
+    Init
+      .then(commit(false))
+      .then(writeCheckpoint)
+      .then(ReaderPin)
+      .then(ReaderBegin)
+      .then(CkBackfill.then(CkSyncDb).then(finishCheckpoint))
+      .expect(not(reader.dbFile) and reader.mark == 2 and readerLwm == 1
+        and readerGcFloor == 2 and fs.nBackfill == 1 and readerReads.get("a") == 1
+        and store.get("a") == Set({ b: 1, e: Inf, v: 1, mat: 2, res: false }))
+      .then(ReaderEnd)
+      .then(ReaderPin)
+      .then(emptyCheckpoint.then(finishCheckpoint))
+      .expect(reader.phase == "pinned" and reader.dbFile and readerLwm == Inf
+        and readerGcFloor == 2 and store.get("a") == Set())
+      .then(ReaderBegin)
+      .expect(reader.snapshot.ts == 1 and readerReads.get("a") == 1)
+
+  run supersededVersionNeedsSnapshotAndBackfillTest =
+    val chain = Set({ b: 1, e: 2, v: 1, mat: 3, res: false })
+    Init.expect(gcChain(chain, 2, true, 3, 1) == chain
+      and gcChain(chain, 2, true, 2, 2) == chain
+      and gcChain(chain, 2, true, 3, 2) == Set())
+
+  action pinInBlockingMode =
+    Init
+      .then(Crash("disk", false, false))
+      .then(OpenStart(false))
+      .then(ReaderPin)
+
+  run blockingCheckpointWaitsForPinTest =
+    pinInBlockingMode.then(CkBegin("blocking").fail())
+
+  run blockingCheckpointWaitsForSnapshotTest =
+    pinInBlockingMode.then(ReaderBegin).then(CkBegin("blocking").fail())
+
+  action beginBlockingCheckpointAfterReader =
+    pinInBlockingMode
+      .then(ReaderBegin)
+      .then(ReaderEnd)
+      .then(CkBegin("blocking"))
+
+  run readerWaitsForBlockingCheckpointTest =
+    beginBlockingCheckpointAfterReader.then(ReaderPin.fail())
+
+  run readerPinsAfterBlockingCheckpointTest =
+    beginBlockingCheckpointAfterReader
+      .then(CkCommit)
+      .then(CkBackfill.then(finishCheckpoint))
+      .then(ReaderPin)
+      .expect(not(flag) and cnt.ck == 1 and ck.pc == "idle" and reader.phase == "pinned")
+}
+
+module recoveryNormalReaderTests {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+
+  action commit(del: bool): bool =
+    CommitWrite("a", del).then(CommitAppendDone).then(CommitFsync).then(CommitPublish)
+
+  action writeCheckpoint = CkBegin("passive").then(CkCommit).then(CkPublish)
+
+  run walPinPartialCopyClearsLiveLogTest =
+    Init
+      .then(commit(false))
+      .then(writeCheckpoint)
+      .then(CkFail)
+      .then(ReaderPin)
+      .then(ReaderBegin)
+      .expect(not(reader.dbFile) and reader.mark == 2
+        and reader.snapshot == { ts: 1, rows: Map("a" -> 1) })
+      .then(commit(true))
+      .then(writeCheckpoint)
+      .expect(fs.walDisk == 0 and clock == 2 and durable == 2 and floor == 0)
+      .then(CkBackfill)
+      .expect(fs.metaMem == 1 and fs.dbMem.get("a") == 1 and fs.metaDisk == 0
+        and fs.nBackfill == 0 and ck.copiedThrough == 1 and fs.walDisk == 2 and floor == 2)
+      .then(CkSyncDb.then(CkTruncLog).then(CkTruncWal).then(CkGc))
+      .expect(fs.metaDisk == 1 and fs.dbDisk.get("a") == 1 and fs.nBackfill == 1
+        and lg.hfile == "None" and lg.file == List() and lg.maxApp == 0
+        and lg.disk == List() and reads.get("a") == 0 and readerReads.get("a") == 1
+        and store.get("a") == Set({ b: 1, e: 2, v: 1, mat: 3, res: false }))
+      .then(Crash("disk", false, false))
+      .expect(reader == readerIdle and not(seen.contains("CleanClose"))
+        and NormalPrefix and fs.wal.length() == 2 and fs.metaDisk == 1)
+      .then(OpenStart(true))
+      .expect(reader == readerIdle and op.expected == { ts: 2, rows: Map("a" -> 0) })
+      .then(OpenBackfill.then(OpenSyncDb).then(OpenHeader).then(OpenFsyncLog)
+        .then(OpenTruncWal).then(OpenSyncWal).then(OpenFinish))
+      .expect(reader == readerIdle and clock == 2 and durable == 2 and floor == 2 and replayTop == 0
+        and fs.metaDisk == 2 and fs.dbDisk.get("a") == 0 and fs.wal.length() == 0
+        and reads.get("a") == 0 and store.get("a") == Set())
+      .then(ReaderPin)
+      .then(ReaderBegin)
+      .expect(reader.dbFile and reader.mark == 1 and readerReads.get("a") == 0
+        and reader.snapshot == { ts: 2, rows: Map("a" -> 0) })
+}

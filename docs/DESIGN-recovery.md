@@ -24,6 +24,9 @@ Turso main `172b828a9`. The repeated NORMAL crash profile uses `353713ec4`.
   (`wal.rs:5093`, `checkpoint.rs:3292-3309`).
 - `normalPartialBackfill` also lets a passive checkpoint copy a nonempty
   prefix of the unbackfilled WAL. A read mark supplies the copy limit.
+- The reader profiles model one user reader on a separate connection.
+  Its pager pin sets the backfill limit. Its MVCC snapshot sets the oldest
+  timestamp that GC must preserve.
 - Since Turso `d52ed55ca`, a checkpoint proceeds from logical-log truncate
   to WAL cleanup after truncate completion. The log truncate changes the
   live image. A crash can keep that image or the prior synced one. If the
@@ -165,8 +168,8 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   replay and across a crash that interrupts recovery. The next successful
   open must return the same timestamp and rows, even if the WAL is gone.
 - `NoLeak`: after a full-backfill checkpoint succeeds, no chain is left whose every version
-  has its last event at or below the snapshot. GC runs with no open snapshot
-  in the model, so the B-tree holds that row. After a blocking checkpoint with no
+  has its last event at or below the snapshot. This check uses profiles with
+  no open reader. After a blocking checkpoint with no
   failed pass before it, the store is empty (`DESIGN-rows.md`, "Mode B").
 
 ## Historical results before removing the checkpoint log sync
@@ -387,16 +390,81 @@ make variants SPECS=MvccRecovery ONLY=normalPartialBackfill
 quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
 ```
 
+## Reader snapshots across checkpoint and recovery
+
+A reader pins its pager view before the transaction enters the MVCC
+transaction table. The pin fixes the physical read position. Registration
+fixes the logical snapshot. A writer can publish between those steps, so
+the two positions need separate state. In blocking mode, a reader takes
+the checkpoint gate before pinning and holds it for the transaction.
+These paths are on Turso main `81efb0b7e` (`core/vdbe/execute.rs:4410-4444`,
+`mod.rs:6750-6830,6856-6903`, `checkpoint.rs:2428-2444`).
+
+`ReaderPin` holds the DB file directly or pins the current WAL frame.
+Slot 0, the DB-file read lock, prevents any new backfill. A WAL slot caps
+the copy at its mark. The copy, WAL sync and DB sync keep the boundaries
+described above (`wal.rs:1044-1064,1138-1145,1209-1232,5035-5122`,
+`checkpoint.rs:3282-3348`). `ReaderBegin` records the last published
+commit and its expected row. A snapshot reads the version chain at that
+timestamp and falls back to its pinned physical view.
+
+A registered reader sets the oldest snapshot for GC. Rule 2 can drop an
+ended version only if its end is at or below that snapshot. Its checkpoint
+and materialization checks still apply. Rule 3 waits until no snapshot is
+registered before dropping the last current version. A pager-only WAL
+pin counts toward the physical GC floor. An unregistered slot-0 pin keeps
+the backfill floor from advancing (`wal.rs:914-927`,
+`mod.rs:8053-8066,8689-8746,10617-10631`,
+`checkpoint.rs:2151-2209,3392-3449`).
+
+`ReaderEnd` releases the snapshot and pin in one step. A crash clears
+both. Turso releases the startup connection's own pin before it
+reconciles the WAL. A user reader stays idle during recovery and can
+start a new snapshot after the read-write open finishes
+(`core/database.rs:1410-1450,1787-1810`,
+`mod.rs:5280-5298,9288-9302`).
+
+In the partial-copy replays, a reader at frame 1 still sees row 1 after
+commit 2 deletes it. The DB file holds row 1 and the WAL holds the
+delete. Under NORMAL, the checkpoint clears the live logical log and
+recovery reads the delete from the synced WAL. Under FULL, commit 3
+inserts a row before logical-log truncate. The log stays because its
+latest append exceeds the checkpoint's bound. Recovery skips log
+commits 1 and 2 and replays commit 3. A fresh reader sees row 3
+(`checkpoint.rs:1834-1849`, `logical_log.rs:1080-1096`).
+
+The profiles put registration and checkpoint GC between commits. They
+model each read and the GC sweep as single steps. With one reader, a
+WAL pin also caps backfill, so the checks exercise those bounds together.
+The replays use Quint actions and compare literal values, timestamps and
+version chains.
+
+TLC checked 100,020 states in `fullWithReader` and 207,388 in
+`normalWithReader` without a violation. Each profile bounds commit
+timestamps at 2 and allows two checkpoints, one failure and one crash.
+All nine new replays and 11 earlier replays passed on macOS. The checks
+exercise Rule 2 at a fixed physical floor and the blocking gate in both
+directions. Removing the Rule 3 snapshot guard makes
+`registeredSnapshotKeepsLastCurrentVersionTest` fail.
+
+```sh
+cd specs
+make variants SPECS=MvccRecovery ONLY="fullWithReader normalWithReader"
+quint test RecoveryTests.qnt --main recoveryFullReaderTests --max-samples 1
+quint test RecoveryTests.qnt --main recoveryNormalReaderTests --max-samples 1
+```
+
 ## What the model leaves out
 
-- Readers and snapshots. GC runs with `lwm = MAX`.
+- Multiple readers, reader upgrades, preparing dependencies, writer pins,
+  and the interval between unregistering a reader and releasing its pin.
+- A checkpoint on the reader's own connection, partial backfill in a
+  failed TRUNCATE pass, and restart-on-write of a fully backfilled WAL.
 - Schema changes, root pages, indexes and aborts.
 - SyncMode OFF. No fsync runs, so a power loss gives no promise.
 - Mixed sync modes per connection (`needs_full_sync`, `mod.rs:1957`).
 - A crash that keeps a middle part of the unsynced log or WAL. The model
   keeps none or all of it.
-- Partial backfill in a failed TRUNCATE pass. The passive model abstracts
-  reader pins as copy limits. A skipped backfill stands for a pinned reader or Busy.
 - The commit-path GC (`gc_incremental`).
 - The header CRC retry at open and I/O errors at open.
 - More than one commit in flight.

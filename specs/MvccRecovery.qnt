@@ -46,6 +46,8 @@
  *                SyncDb, TruncLog (locked decision, writer reset and
  *                truncate submit), TruncDone (only for an async backend),
  *                TruncWal, Gc.
+ *   Reader       NextWithReader lets one user reader pin the DB file or WAL,
+ *                register a logical snapshot, and release both on end.
  *   CkFail       An error or an abandoned checkpoint at one of the steps
  *                Commit to TruncWal. The checkpoint stops without GC, and a
  *                committed WAL frame stays. A truncate error (only with
@@ -74,10 +76,9 @@
  *                    that the B-tree already holds in full. After a blocking
  *                    checkpoint, the store is empty.
  *
- * Not modeled: readers and snapshots (GC runs with lwm = MAX; a skipped
- * backfill stands for a pinned reader or Busy), schema and root pages,
- * indexes, aborts, SyncMode OFF, mixed sync modes per connection, a crash that
- * keeps a middle part of the unsynced log or WAL, the commit-path GC
+ * Not modeled: multiple readers, flag-on TRUNCATE with a reader, schema and
+ * root pages, indexes, aborts, SyncMode OFF, mixed sync modes per connection,
+ * a crash that keeps a middle part of the unsynced log or WAL, the commit-path GC
  * (gc_incremental), the header CRC retry at open, I/O errors at open, and
  * more than one commit in flight.
  */
@@ -161,6 +162,7 @@ module MvccRecovery {
   // crash names the last crash: "tornFirstAppend" when it tore the header of
   // a first append while the WAL had frames.
   type RecoveryPoint = { ts: int, rows: str -> int }
+  type Reader = { phase: str, mark: int, dbFile: bool, snapshot: RecoveryPoint }
   type OpenSt = { pc: str, f: bool, walHad: bool, hdrWas: str, crash: str,
                   expected: RecoveryPoint }
   type Counters = { ck: int, crash: int, fail: int }
@@ -177,6 +179,7 @@ module MvccRecovery {
   var fs: Files
   var cm: Inflight
   var ck: Ck
+  var reader: Reader
   var op: OpenSt
   var cnt: Counters
   var leakSnap: int             // The snapshot of the checkpoint that the last
@@ -238,18 +241,17 @@ module MvccRecovery {
   pure def stamp(chain: Set[Ver], snap: int, pos: int): Set[Ver] =
     chain.map(x => if (terminal(x) <= snap) { ...x, mat: pos } else x)
 
-  // gc_version_chain with lwm = MAX (no open snapshot).
-  pure def gcChain(chain: Set[Ver], ckptMax: int, passive: bool, gcFloor: int): Set[Ver] =
+  pure def gcChain(chain: Set[Ver], ckptMax: int, passive: bool, gcFloor: int, lwm: int): Set[Ver] =
     val materialized = chain.filter(x => x.mat > 0 and x.mat <= gcFloor)
     val hasCurrent = chain.exists(x => x.b > 0 and x.e == Inf)
     val r2 = chain.filter(x =>
-      if (x.e < Inf) {
+      if (x.e < Inf and x.e <= lwm) {
         if (passive) not(materialized.contains(x))
         else x.e > ckptMax and (x.res or (x.b > 0 and x.b <= ckptMax) or not(hasCurrent))
       } else true)
     val r3 = r2.filter(x =>
       x.b > 0 and x.e == Inf and materialized.contains(x) and (passive or x.b <= ckptMax))
-    if (r2.size() == 1 and r3.size() == 1) Set() else r2
+    if (lwm == Inf and r2.size() == 1 and r3.size() == 1) Set() else r2
 
   // The startup decision and the state that an uninterrupted recovery
   // rebuilds from these files. `ignoreRefusals` gives the rows that the
@@ -291,6 +293,7 @@ module MvccRecovery {
 
   val normal: bool = SyncMode == "normal"
   pure def maxI(a: int, b: int): int = if (a > b) a else b
+  pure def minI(a: int, b: int): int = if (a < b) a else b
 
   // ------------------------------------------------------------ derived state
 
@@ -303,6 +306,23 @@ module MvccRecovery {
                      clears: false, nonempty: false, copiedThrough: 0 }
   val noOpen: OpenSt = { pc: "idle", f: false, walHad: false, hdrWas: "", crash: "",
                         expected: { ts: -1, rows: Keys.mapBy(k => 0) } }
+  val readerIdle: Reader = { phase: "idle", mark: 0, dbFile: false,
+                             snapshot: { ts: -1, rows: Keys.mapBy(k => 0) } }
+  val readerHeld: bool = reader.phase != "idle"
+  val readerActive: bool = reader.phase == "active"
+  val readerLwm: int = if (readerActive) reader.snapshot.ts else Inf
+  val readerGcFloor: int =
+    if (readerActive or (readerHeld and not(reader.dbFile))) minI(backfillFloor, reader.mark)
+    else backfillFloor
+  val readerCopyLimit: int =
+    if (not(readerHeld)) fs.wal.length()
+    else if (reader.dbFile) fs.nBackfill
+    else reader.mark - fs.walBase
+  val readerBtree: str -> int =
+    if (not(readerHeld) or reader.dbFile) fs.dbMem
+    else applyFrames(fs.dbMem, fs.wal.slice(0, reader.mark - fs.walBase))
+  val readerReads: str -> int =
+    Keys.mapBy(k => readAt(store.get(k), readerBtree.get(k), reader.snapshot.ts))
 
   def openOutcome(f: bool, ro: bool): Rebuild =
     rebuild(f, ro, Fix9770, RecoveryOneTs, false, Keys, fs.wal, lg.hdisk, lg.disk,
@@ -334,6 +354,7 @@ module MvccRecovery {
     cm' = { on: false, rec: { ts: 0, k: "", v: 0, prev: false, ok: true }, hdr: false,
             stage: "" },
     ck' = ckIdle,
+    reader' = readerIdle,
     op' = noOpen,
     cnt' = { ck: 0, crash: 0, fail: 0 },
     leakSnap' = -1,
@@ -341,6 +362,35 @@ module MvccRecovery {
     seen' = Set(),
     hist' = Map(0 -> Keys.mapBy(k => 0)),
     floor' = 0,
+  }
+
+  // ---------------------------------------------------------------- reader
+
+  action SetReader(state: Reader): bool = all {
+    reader' = state,
+    mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
+    durable' = durable, lg' = lg, fs' = fs, cm' = cm, ck' = ck, op' = op, cnt' = cnt,
+    leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen, hist' = hist, floor' = floor,
+  }
+
+  action ReaderPin = all {
+    mode == "run",
+    not(readerHeld),
+    not(commitsBlocked),
+    SetReader({ ...readerIdle, phase: "pinned", mark: walEnd, dbFile: backfillFloor == walEnd }),
+  }
+
+  action ReaderBegin = all {
+    mode == "run",
+    reader.phase == "pinned",
+    not(cm.on),
+    SetReader({ ...reader, phase: "active", snapshot: { ts: clock, rows: truth } }),
+  }
+
+  action ReaderEnd = all {
+    mode == "run",
+    readerHeld,
+    SetReader(readerIdle),
   }
 
   // ---------------------------------------------------------------- commits
@@ -369,6 +419,7 @@ module MvccRecovery {
       cm' = { on: true, rec: r, hdr: lg.off0, stage: "submitted" },
       hist' = if (normal) hist.put(ts, truth.set(k, r.v)) else hist,
       floor' = floor,
+      reader' = reader,
       mode' = mode, flag' = flag, truth' = truth, store' = store, durable' = durable,
       fs' = fs, ck' = ck, op' = op, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop, seen' = seen,
@@ -381,6 +432,7 @@ module MvccRecovery {
     all {
       hist' = hist, floor' = floor,
       cm' = { ...cm, stage: "appended" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, fs' = fs, ck' = ck, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -396,6 +448,7 @@ module MvccRecovery {
       // Under NORMAL the commit skips the log fsync (mod.rs:3539-3546).
       lg' = if (normal) lg else { ...lg, disk: lg.file, hdisk: lg.hfile },
       cm' = { ...cm, stage: "synced" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, ck' = ck, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -416,6 +469,7 @@ module MvccRecovery {
       leakSnap' = -1,
       seen' = if (ck.pc == "publish" and ck.nonempty) seen.union(Set("CommitInPublishWindow"))
               else seen,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, durable' = durable, lg' = lg, fs' = fs,
       ck' = ck, op' = op, cnt' = cnt, replayTop' = replayTop,
     }
@@ -432,7 +486,7 @@ module MvccRecovery {
     cnt.ck < MaxCheckpoints,
     CheckpointKinds.contains(kind),
     if (flag) kind != "blocking" else kind == "blocking",
-    kind != "blocking" or not(cm.on),
+    kind != "blocking" or (not(cm.on) and not(readerHeld)),
     val snap = lastAcked
     val changed = Keys.filter(k => store.get(k).exists(x =>
       (x.b > durable and x.b <= snap) or (x.e > durable and x.e <= snap)))
@@ -444,6 +498,7 @@ module MvccRecovery {
               nonempty: changed != Set(), copiedThrough: 0 },
       cnt' = { ...cnt, ck: cnt.ck + 1 },
       leakSnap' = -1,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, fs' = fs, cm' = cm, op' = op, replayTop' = replayTop,
       seen' = seen,
@@ -466,6 +521,7 @@ module MvccRecovery {
       ck' = { ...ck, pc: if (ck.nonempty) "publish" else "backfill" },
       hist' = hist,
       floor' = if (normal and ck.nonempty and FixCkCommitSyncsWal) maxI(floor, ck.snap) else floor,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -488,6 +544,7 @@ module MvccRecovery {
       ck' = { ...ck, pc: "backfill" },
       seen' = if (replayTop > durable and ck.snap >= replayTop)
                 seen.union(Set("CkOfReplayedRows")) else seen,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       lg' = lg, fs' = fs, cm' = cm, op' = op, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop,
@@ -498,6 +555,7 @@ module MvccRecovery {
   action CkBackfillTo(upTo: int): bool = all {
     mode == "run",
     ck.pc == "backfill",
+    fs.nBackfill <= upTo and upTo <= readerCopyLimit,
     val copied = upTo > fs.nBackfill
     val frames = fs.wal.slice(fs.nBackfill, upTo)
     all {
@@ -508,13 +566,14 @@ module MvccRecovery {
       ck' = { ...ck, pc: if (copied) "syncdb" else "trunclog", copiedThrough: upTo },
       hist' = hist,
       floor' = if (normal and copied) maxI(floor, lastMeta(fs.metaMem, fs.wal)) else floor,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
     }
   }
 
-  action CkBackfill = CkBackfillTo(fs.wal.length())
+  action CkBackfill = CkBackfillTo(readerCopyLimit)
 
   action CkBackfillPartial(upTo: int): bool = all {
     ck.kind == "passive",
@@ -540,6 +599,7 @@ module MvccRecovery {
         .union(if (fs.wal.length() > 0) Set("BackfillSkipped") else Set())
         .union(if (fs.walDisk < fs.wal.length()) Set("BackfillSkippedUnsynced") else Set()),
       hist' = hist, floor' = floor,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop,
@@ -553,6 +613,7 @@ module MvccRecovery {
       hist' = hist, floor' = floor,
       fs' = { ...fs, dbDisk: fs.dbMem, metaDisk: fs.metaMem, nBackfill: ck.copiedThrough },
       ck' = { ...ck, pc: "trunclog" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -577,6 +638,7 @@ module MvccRecovery {
       ck' = { ...ck, clears: clears,
               pc: if (clears and AsyncLogTruncate) "truncwait" else "truncwal" },
       seen' = if (clears) seen else seen.union(Set("LogRetained")),
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop,
@@ -597,6 +659,7 @@ module MvccRecovery {
               hfile: if (lg.appSince and not(eraseNew)) lg.hfile else "None" },
       ck' = { ...ck, pc: "truncwal" },
       seen' = if (eraseNew) seen.union(Set("AppendErased")) else seen,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop,
@@ -612,6 +675,7 @@ module MvccRecovery {
             else { ...fs, wal: List(), walDisk: 0, walBase: walEnd + 1, nBackfill: 0 },
       ck' = { ...ck, pc: "gc" },
       hist' = hist, floor' = floor,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -631,7 +695,7 @@ module MvccRecovery {
     // A chain outside the write set that only a fix stamped.
     val fixUsed = Keys.exists(k => ck.wset.get(k) == NotWritten
                                    and stamped.get(k) != store.get(k))
-    val after = Keys.mapBy(k => gcChain(stamped.get(k), durable, flag, backfillFloor))
+    val after = Keys.mapBy(k => gcChain(stamped.get(k), durable, flag, readerGcFloor, readerLwm))
     all {
       store' = after,
       ck' = ckIdle,
@@ -640,6 +704,7 @@ module MvccRecovery {
       seen' = seen
         .union(if (fixUsed) Set("StampFixUsed") else Set())
         .union(if (ck.kind == "truncflag" and ck.nonempty) Set("TruncFlagDone") else Set()),
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, durable' = durable,
       lg' = lg, fs' = fs, cm' = cm, op' = op, cnt' = cnt, replayTop' = replayTop,
     }
@@ -674,6 +739,7 @@ module MvccRecovery {
         .union(if (afterPublish and ck.kind != "blocking") Set("FailAfterPublishFlagOn")
                else Set())
         .union(if (truncErr) Set("TruncateError") else Set()),
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, op' = op, leakSnap' = leakSnap,
       replayTop' = replayTop,
@@ -689,7 +755,7 @@ module MvccRecovery {
   action Crash(logPick: str, dbMemKept: bool, walMemKept: bool): bool = all {
     mode == "run" or mode == "open",
     cnt.crash < MaxCrashes,
-    not(CrashOnlyWhenIdle) or (mode == "run" and not(cm.on) and ck.pc == "idle"),
+    val cleanClose = mode == "run" and not(cm.on) and ck.pc == "idle" and not(readerHeld)
     val walTruncatePending = op.pc == "syncwal"
     val writeOpen = cm.on and not(hasFrame(lg.disk, cm.rec))
     val tornHdr = logPick == "torn" and ((writeOpen and cm.hdr) or lg.hdrFlight)
@@ -714,7 +780,7 @@ module MvccRecovery {
       .union(if (ck.kind == "blocking" and ck.nonempty and fs.wal.length() > 0
                  and Set("truncwait", "truncwal").contains(ck.pc) and hd == "None")
                Set("CrashBlockingTruncWal") else Set())
-      .union(if (not(cm.on) and ck.pc == "idle" and mode == "run") Set("CleanClose") else Set())
+      .union(if (cleanClose) Set("CleanClose") else Set())
       .union(if (fs.wal.length() > 0 and hd == "None") Set("WalFramesNoLog") else Set())
       .union(if (normal and logPick == "disk"
                  and (lostAcked or (not(walTruncatePending) and wal2.length() < fs.wal.length())))
@@ -722,9 +788,11 @@ module MvccRecovery {
       .union(if (mode == "open" and Set("fsynclog", "truncwal", "syncwal", "replay").contains(op.pc))
                Set("CrashInRecovery") else Set())
     all {
+      not(CrashOnlyWhenIdle) or cleanClose,
       hist' = hist, floor' = floor,
       walMemKept implies (fs.walDisk < fs.wal.length() or walTruncatePending),
       logPick != "torn" or writeOpen or lg.hdrFlight,
+      reader' = readerIdle,
       mode' = "down",
       truth' = if (kept) truth.set(cm.rec.k, cm.rec.v) else truth,
       lg' = { file: frames, hfile: hd, disk: frames, hdisk: hd, off0: true, crcReset: false,
@@ -745,6 +813,7 @@ module MvccRecovery {
 
   // The end of recovery: the state of the running process.
   action GoRun(f: bool, rb: Rebuild): bool = all {
+    reader' = reader,
     mode' = "run",
     flag' = f,
     clock' = rb.clock,
@@ -786,6 +855,7 @@ module MvccRecovery {
       rb.ok,
       if (walHas) all {
         hist' = hist, floor' = floor,
+        reader' = reader,
         mode' = "open",
         op' = { ...op, pc: "backfill", f: f, walHad: walHas, hdrWas: lg.hdisk,
                 expected: expected },
@@ -808,6 +878,7 @@ module MvccRecovery {
       hist' = hist, floor' = floor,
       fs' = { ...fs, dbMem: applyFrames(fs.dbMem, fs.wal), metaMem: lastMeta(fs.metaMem, fs.wal) },
       op' = { ...op, pc: "syncdb" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, ck' = ck, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop, seen' = seen,
@@ -822,6 +893,7 @@ module MvccRecovery {
       fs' = { ...fs, dbDisk: fs.dbMem, metaDisk: fs.metaMem },
       op' = { ...op, pc: "header" },
       hist' = hist, floor' = floor,
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, ck' = ck, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop, seen' = seen,
@@ -840,6 +912,7 @@ module MvccRecovery {
       lg' = { ...lg, hfile: "Valid", file: if (lg.hfile == "Valid") lg.file else List(),
               hdrFlight: lg.hfile != "Valid" },
       op' = { ...op, pc: "fsynclog" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, ck' = ck, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop, seen' = seen,
@@ -854,6 +927,7 @@ module MvccRecovery {
       hist' = hist, floor' = floor,
       lg' = { ...lg, disk: lg.file, hdisk: lg.hfile, hdrFlight: false },
       op' = { ...op, pc: "truncwal" },
+      reader' = reader,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, ck' = ck, cnt' = cnt, leakSnap' = leakSnap,
       replayTop' = replayTop, seen' = seen,
@@ -865,6 +939,7 @@ module MvccRecovery {
     mode == "open",
     op.pc == "truncwal",
     op' = { ...op, pc: "syncwal" },
+    reader' = reader,
     mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
     durable' = durable, lg' = lg, fs' = fs, cm' = cm, ck' = ck, cnt' = cnt,
     leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -876,6 +951,7 @@ module MvccRecovery {
     op.pc == "syncwal",
     fs' = { ...fs, wal: List(), walDisk: 0 },
     op' = { ...op, pc: "replay" },
+    reader' = reader,
     mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
     durable' = durable, lg' = lg, cm' = cm, ck' = ck, cnt' = cnt,
     leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -899,7 +975,7 @@ module MvccRecovery {
     }
   }
 
-  action Next = any {
+  action NextShared = any {
     nondet k = Keys.oneOf()
     nondet del = Bool.oneOf()
     CommitWrite(k, del),
@@ -911,13 +987,11 @@ module MvccRecovery {
     CkCommit,
     CkPublish,
     CkBackfill,
-    CkBackfillNone,
     CkSyncDb,
     CkTruncLog,
     nondet eraseNew = Bool.oneOf()
     CkTruncDone(eraseNew),
     CkTruncWal,
-    CkGc,
     CkFail,
     nondet logPick = Set("disk", "mem", "torn").oneOf()
     nondet dbMemKept = Bool.oneOf()
@@ -934,16 +1008,47 @@ module MvccRecovery {
     OpenFinish,
   }
 
+  action Next = any {
+    NextShared,
+    CkBackfillNone,
+    CkGc,
+  }
+
   action NextWithPartialBackfill = any {
     Next,
     nondet upTo = fs.nBackfill.to(fs.wal.length()).oneOf()
     CkBackfillPartial(upTo),
   }
 
+  action NextWithReader = any {
+    NextShared,
+    ReaderPin,
+    ReaderBegin,
+    ReaderEnd,
+    all { not(cm.on), CkGc },
+  }
+
   // -------------------------------------------------------------- invariants
 
   val TypeOK: bool = Set("run", "open", "down").contains(mode) and clock <= MaxTs
     and 0 <= fs.nBackfill and fs.nBackfill <= fs.walDisk and fs.walDisk <= fs.wal.length()
+
+  val ReaderSnapshotCorrect: bool =
+    if (readerActive) reader.snapshot.ts >= 0 and reader.snapshot.ts <= lastAcked
+                      and readerReads == reader.snapshot.rows
+    else reader.snapshot == readerIdle.snapshot
+
+  val ReaderPinCorrect: bool = readerHeld implies all {
+    backfillFloor <= reader.mark and reader.mark <= walEnd,
+    reader.dbFile implies backfillFloor == reader.mark,
+    ck.pc == "syncdb" implies fs.walBase + ck.copiedThrough <= reader.mark,
+  }
+
+  val ReaderLifecycleCorrect: bool = all {
+    Set("idle", "pinned", "active").contains(reader.phase),
+    (mode != "run" or not(readerHeld)) implies reader == readerIdle,
+    readerHeld implies not(commitsBlocked),
+  }
 
   // Every open the user can pick that succeeds gives the committed rows.
   // While the system runs, reads give the committed rows.
