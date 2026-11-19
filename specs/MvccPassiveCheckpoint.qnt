@@ -395,6 +395,31 @@ module MvccPassiveCheckpoint {
   // ---------------------------------------------------------------------------
   // Writers
 
+  // A version with begin None and end None is rolled-back garbage.
+  def CurrentVersions(k: str): Set[Version] =
+    chain.get(k).filter(x => x.e == Inf and x.b != 0)
+
+  def ChainAfterWrite(k: str, ts: int, isDelete: bool): Set[Version] = {
+    val cur = CurrentVersions(k)
+    val old = Oracle(k, ts)
+    val ended =
+      if (cur != Set()) cur.map(x => { ...x, e: ts, mat: 0 })
+      else if (old != 0) Set({ b: 0, e: ts, value: old, mat: 0 })
+      else Set()
+    val added = if (isDelete) Set() else Set({ b: ts, e: Inf, value: ts, mat: 0 })
+    chain.get(k).exclude(cur).union(ended).union(added)
+  }
+
+  def NewInflight(k: str, ts: int, v: int, mark: int): Inflight = {
+    val cur = CurrentVersions(k)
+    {
+      ts: ts, k: k, v: v, logged: false,
+      marked: not(DirtyKeys and GuardMarkBeforeCommitEnd),
+      omat: if (AbortKeepsMaterialized and cur != Set()) AnyVersion(cur).mat else 0,
+      mark: mark,
+    }
+  }
+
   // A commit takes its timestamp from the clock, ends the current version and
   // adds the new one. In the code the chain holds the TxID until the commit
   // rewrites it to the timestamp. Readers read Preparing versions
@@ -402,26 +427,14 @@ module MvccPassiveCheckpoint {
   // prepared commit finishes.
   action WritePrepare(k: str, isDelete: bool): bool = {
     val ts = if (WriterBeginTicks) clock + 2 else clock + 1
-    val old = Oracle(k, ts)
     val v = if (isDelete) 0 else ts
-    // A version with begin None and end None is rolled-back garbage.
-    val cur = chain.get(k).filter(x => x.e == Inf and x.b != 0)
-    val omat = if (AbortKeepsMaterialized and cur != Set()) AnyVersion(cur).mat else 0
-    val ended =
-      if (cur != Set()) cur.map(x => { ...x, e: ts, mat: 0 })
-      else if (old != 0) Set({ b: 0, e: ts, value: old, mat: 0 })
-      else Set()
-    val added = if (isDelete) Set() else Set({ b: ts, e: Inf, value: ts, mat: 0 })
     all {
       ts <= MaxTs,
       not(inflight.exists(i => i.k == k)),
-      not(isDelete and old == 0),
+      not(isDelete and Oracle(k, ts) == 0),
       clock' = ts,
-      chain' = chain.set(k, chain.get(k).exclude(cur).union(ended).union(added)),
-      inflight' = inflight.union(Set({ ts: ts, k: k, v: v, logged: false,
-                                       marked: not(DirtyKeys and GuardMarkBeforeCommitEnd),
-                                       omat: omat,
-                                       mark: if (WritersPinMarks) wal.length() else 0 })),
+      chain' = chain.set(k, ChainAfterWrite(k, ts, isDelete)),
+      inflight' = inflight.union(Set(NewInflight(k, ts, v, if (WritersPinMarks) wal.length() else 0))),
       writes' = writes.union(Set({ ts: ts, k: k, v: v })),
       lastCommitted' = lastCommitted, llog' = llog, wal' = wal, nBackfill' = nBackfill,
       db' = db, dbMeta' = dbMeta, durable' = durable, backfillFloor' = backfillFloor,
@@ -814,13 +827,6 @@ module MvccPassiveCheckpoint {
   action ReaderUpdate(r: str, k: str): bool = {
     val b = rd.get(r).b
     val ts = clock + 1
-    val old = Oracle(k, ts)
-    val cur = chain.get(k).filter(x => x.e == Inf and x.b != 0)
-    val ended =
-      if (cur != Set()) cur.map(x => { ...x, e: ts, mat: 0 })
-      else if (old != 0) Set({ b: 0, e: ts, value: old, mat: 0 })
-      else Set()
-    val added = Set({ b: ts, e: Inf, value: ts, mat: 0 })
     all {
       Updates,
       ck.owner != r or ck.pc == "idle",
@@ -838,13 +844,9 @@ module MvccPassiveCheckpoint {
         clock' = clock, chain' = chain, inflight' = inflight, writes' = writes, rmw' = rmw,
       } else all {
         not(inflight.exists(i => i.k == k)),
-        // copy of the WritePrepare body with isDelete = false and this ts
         clock' = ts,
-        chain' = chain.set(k, chain.get(k).exclude(cur).union(ended).union(added)),
-        inflight' = inflight.union(Set({ ts: ts, k: k, v: ts, logged: false,
-                                         marked: not(DirtyKeys and GuardMarkBeforeCommitEnd),
-                                         omat: if (AbortKeepsMaterialized and cur != Set()) AnyVersion(cur).mat else 0,
-                                         mark: if (WritersPinMarks) rd.get(r).mark else 0 })),
+        chain' = chain.set(k, ChainAfterWrite(k, ts, false)),
+        inflight' = inflight.union(Set(NewInflight(k, ts, ts, if (WritersPinMarks) rd.get(r).mark else 0))),
         writes' = writes.union(Set({ ts: ts, k: k, v: ts })),
         rmw' = rmw.union(Set({ k: k, b: b, ts: ts })),
         ck' = ck,

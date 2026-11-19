@@ -575,6 +575,12 @@ inserter). So the window that matters is from W's begin to W's first write of
 keeps that window. `NoLostUpdate` is first committer wins: no write of `k` has
 a timestamp between the begin and the commit of an update.
 
+`WritePrepare` and the commit branch of `ReaderUpdate` use
+`ChainAfterWrite` to end the old version and add its replacement, if any.
+Both use `NewInflight` to record the pending commit. With
+`WritersPinMarks`, a plain writer uses the current WAL length and an
+upgrading reader keeps its read mark.
+
 | Module | Result | Distinct states | Seconds |
 |---|---|---|---|
 | `main` | No error | 17,344,980 | 473 |
