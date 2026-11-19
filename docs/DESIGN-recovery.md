@@ -6,25 +6,29 @@ the committed rows now and after more commits and checkpoints. The other specs
 check recovery with a pure function that never refuses, so they cannot find
 bugs where a database does not open.
 
-All paths in this document are relative to the repository root. Line numbers
-are for commit 7c607534b.
+All paths in this document are relative to the repository root. Older line references
+are for Turso commit `7c607534b`. The sync and truncate changes use
+Turso main `172b828a9`.
 
 ## Scope
 
-- SyncMode FULL and NORMAL (constant `SyncMode`). Under FULL, every commit
-  fsyncs the log (`core/mvcc/database/mod.rs:3539-3546`), and a pager commit
-  fsyncs the WAL (`core/storage/pager.rs:4776`). Under NORMAL, the commit skips the
-  log fsync (`mod.rs:3539-3546`), the pager commit of a checkpoint skips the
-  WAL fsync (`pager.rs:4776`: only under FULL), and only the checkpoint log
-  fsync (`core/mvcc/database/checkpoint.rs:3279-3289`) and the WAL fsync of a
-  backfill that copies a frame (`core/storage/wal.rs:5093`) make data durable.
-  OFF skips every fsync, and the model does not cover it. Line numbers in
-  this bullet are for turso main 740300d9d.
-- A passive backfill that copies no frame (`PassiveBackfillSkips`): a reader
-  pinned at `nbackfills` makes `to_checkpoint` empty (`wal.rs:1209-1230`), or
-  the backfill gets Busy under a DbFile reader (`core/mvcc/database/checkpoint.rs:3306-3322`).
-  The checkpoint then skips the DB fsync and the WAL fsync (`wal.rs:5093`,
-  `core/mvcc/database/checkpoint.rs:3344-3347`) and goes on to the log truncate.
+- The file syncs use one sync mode for all connections. Under FULL, a commit
+  syncs the logical log and a checkpoint pager commit syncs the WAL. Under
+  NORMAL, both skip that sync (`core/mvcc/database/mod.rs:1955-1957`,
+  `core/storage/pager.rs:4776`). Backfill syncs the WAL before it copies
+  pages. The checkpoint syncs the database file if it copied any frames
+  (`core/storage/wal.rs:5085-5122`, `core/mvcc/database/checkpoint.rs:3330-3349`).
+- A passive backfill can copy zero frames (`PassiveBackfillSkips`). A pinned
+  reader can leave the range empty, or the backfill can return Busy. The
+  checkpoint can finish without syncing the WAL or the database file
+  (`wal.rs:5093`, `checkpoint.rs:3292-3309`).
+- Since Turso `d52ed55ca`, a checkpoint proceeds from logical-log truncate
+  to WAL cleanup after truncate completion. The log truncate changes the
+  live image. A crash can keep that image or the prior synced one. If the
+  old log survives, replay skips its frames at or below the recovered
+  `persistent_tx_ts_max`. The open path still syncs the recovery header
+  (`checkpoint.rs:3257-3279`, `mod.rs:9395-9419`, `mod.rs:9848` on
+  Turso main `172b828a9`).
 - An explicit `FULL` or `RESTART` checkpoint maps to TRUNCATE
   (`core/mvcc/database/checkpoint.rs:896-902`), so it is the `blocking` kind (flag
   off) or the `truncflag` kind (flag on).
@@ -45,7 +49,7 @@ are for commit 7c607534b.
 | `fs.dbDisk`, `fs.metaDisk` | `.db` after fsync | `meta` is `persistent_tx_ts_max` |
 | `fs.wal` | `.db-wal` | The WAL truncate and its fsync are one step |
 | `fs.walDisk` | `.db-wal` after fsync | The number of frames that an fsync made durable. Equals `wal.length()` under FULL. A crash keeps all frames or only these (`walKept`) |
-| `hist`, `floor` | none (ghost state) | Under NORMAL only. `hist(t)` is the committed rows after timestamp t. `floor` is the newest timestamp that the engine promised durable |
+| `hist`, `floor` | none (ghost state) | Under NORMAL only. `hist(t)` is the committed rows after timestamp t. `floor` is the newest timestamp that a WAL sync made durable or an open recovered |
 | `lg.file`, `lg.hfile` | `.db-log` as the OS shows it | `hfile` is `None` or `Valid` |
 | `lg.disk`, `lg.hdisk` | `.db-log` after fsync | `hdisk` can also be `Invalid` after a torn write |
 | `lg.off0`, `lg.maxApp`, `lg.crcReset` | log writer state | Offset 0, `max_appended_commit_ts`, and a running CRC that restarted from a new salt at an offset above 0 |
@@ -63,18 +67,17 @@ header, the frame has `ok = false`. Replay stops before the first such frame.
 | `CommitWrite` | `logical_log.rs:717` (header with the first frame), `logical_log.rs:687` (`max_appended_commit_ts`) | Submits the append. An update writes a delete and an upsert, as `mod.rs:2470` describes |
 | `CommitAppendDone` | append completion (`mod.rs:3498`) | |
 | `CommitFsync` | `mod.rs:3542` | The frame is durable here. Under NORMAL the step copies nothing to `lg.disk` (`mod.rs:3539-3546`) |
-| `CommitPublish` | `mod.rs:3629` | The commit is acknowledged, and its versions enter the store. Under NORMAL, if a checkpoint log fsync already made the record durable, `floor` rises to its timestamp (tag `PublishDurableNormal`, witness `reachPublishDurableNormal`). Without this rule, a second checkpoint that skips the backfill can truncate the log and a crash loses a commit that was durable and acknowledged |
+| `CommitPublish` | `mod.rs:3629` | The commit is acknowledged, and its versions enter the store |
 | `CkBegin` | collect states, `checkpoint_state_machine.rs:2488-2604` | The blocking kind waits for every transaction. The flag-on kinds do not take the lock before the snapshot |
-| `CkCommit` | `checkpoint_state_machine.rs:3241-3295`, `pager.rs:4776` | Pager commit of one WAL frame. An empty write set skips the pager commit and the publish (line 2643). The frame is durable (`walDisk`) under FULL, or under NORMAL with `FixCkCommitSyncsWal` |
+| `CkCommit` | `checkpoint_state_machine.rs:3241-3295`, `pager.rs:4776` | Pager commit of one WAL frame. An empty write set skips the pager commit and the publish (line 2643). The frame is durable (`walDisk`) under FULL, or under NORMAL with `FixCkCommitSyncsWal`, which also raises `floor` |
 | `CkPublish` | `apply_checkpoint_publish_window`, line 2188 | `durable_txid_max` advances. A separate step for a crash, an error or an abandoned checkpoint after the pager commit. Other connections can commit while the pager commit I/O completes. The passive retry on a busy publish flag (line 3299) cannot fire today: one flag-on checkpoint runs at a time (line 2488), and only it sets the flag (`mod.rs:7957`) |
-| `CkBackfill` | `checkpoint_state_machine.rs:3377`, `wal.rs:5093` | Whole WAL, one step, then the WAL fsync (`walDisk` = all frames). A partial backfill is not modeled |
-| `CkBackfillNone` | `checkpoint_state_machine.rs:3306-3322`, `3344-3347`, `wal.rs:1209-1230` | Passive kind with `PassiveBackfillSkips`. Changes no file, skips `CkSyncDb`, goes to `CkTruncLog`. Tags `BackfillSkipped` (WAL has frames) and `BackfillSkippedUnsynced` (some are not durable) |
+| `CkBackfill` | `wal.rs:5085-5122` | Syncs the WAL, then copies all its frames in one step. Under NORMAL a nonempty sync raises `floor` to the newest metadata timestamp covered by the sync |
+| `CkBackfillNone` | `checkpoint.rs:3292-3309`, `wal.rs:5093` | With `PassiveBackfillSkips`, leaves the files and `floor` as they were and goes to `CkTruncLog`. Tags `BackfillSkipped` (WAL has frames) and `BackfillSkippedUnsynced` (some are not durable) |
 | `CkSyncDb` | `checkpoint_state_machine.rs:3409` | |
-| `CkTruncLog` | `checkpoint_state_machine.rs:3333`, `logical_log.rs:1058-1095`, lock at `core/mvcc/persistent_storage/mod.rs:230` | Under the log lock: the decision, the truncate submit and the writer reset. The blocking kind clears the whole log (`clears_whole_logical_log`, line 1942). If one frame is above the snapshot, the flag-on kinds keep the log |
+| `CkTruncLog` | `checkpoint.rs:3257-3279`, `logical_log.rs:1063-1100`, lock at `core/mvcc/persistent_storage/mod.rs:230` | Under the log lock: the decision, the truncate submit and the writer reset. The blocking kind clears the whole log (`clears_whole_logical_log`, line 1942). If one frame is above the snapshot, the flag-on kinds keep the log. The truncate only changes the live image |
 | `CkTruncDone` | `core/io/io_uring.rs:848` | Only with `AsyncLogTruncate`. The truncate completes later, and it can run after a newer append |
-| `CkFsyncLog` | `checkpoint_state_machine.rs:3359` | Makes every completed write durable, also the append of a commit that is not yet acknowledged. Under NORMAL it raises `floor` to the newest acknowledged frame of the log |
 | `CkTruncWal` | `checkpoint_state_machine.rs:3446` | The WAL truncate and its fsync, one step. The passive kind keeps the WAL |
-| `CkGc` | `gc_checkpointed_table_versions` (line 2252), then `Finalize` (line 3531) | Stamps only the write set (`stamp_chain_materialized`, `mod.rs:8651`), then runs `gc_version_chain` (`mod.rs:8581`) on every chain. The GC batches are one step. Under NORMAL it raises `floor` to the snapshot: the checkpoint returned OK |
+| `CkGc` | `gc_checkpointed_table_versions` (line 2252), then `Finalize` (line 3531) | Stamps only the write set (`stamp_chain_materialized`, `mod.rs:8651`), then runs `gc_version_chain` (`mod.rs:8581`) on every chain. The GC batches are one step |
 | `CkFail` | `cleanup_after_external_io_error` (`checkpoint_state_machine.rs:1039-1075`) | See below |
 | `Crash` | none | Keeps fsynced data. An unsynced write is lost, kept, or torn. `walKept` keeps the unsynced WAL frames or drops them (allowed only when some frame is unsynced) |
 | `OpenStart` | `maybe_complete_interrupted_checkpoint_nonblock` (`mod.rs:9179`) | The startup decision. It keeps the open flag, whether the WAL had frames, and the header state in `op`. With no WAL frames, replay follows at once |
@@ -144,21 +147,21 @@ The open does not restore `max_appended_commit_ts`. The model sets `maxApp` to
   refusals. The first one checks only files with WAL frames.
 - `RunCorrect`: while the system runs, reads give the committed rows. It is
   the run half of `RecoveryCorrect`, for NORMAL.
-- `NormalPrefix`: under NORMAL, a crash can drop acknowledged commits, so
-  `RecoveryCorrect` is too strong. Every open that succeeds gives the rows of
-  one commit point t with `floor <= t <= clock`. `floor` is the newest
-  timestamp that the engine promised durable: a checkpoint that returned OK
-  (`CkGc`), a checkpoint log fsync that covered the commit (`CkFsyncLog`), or
-  a commit that publishes after a checkpoint log fsync made its record
-  durable (`CommitPublish`).
-  `t = clock` can be the commit in flight. After an open, `GoRun` resets
-  `truth`, `hist` and `floor` to what the open gave.
+- `NormalPrefix`: every successful NORMAL open gives the rows of a commit
+  point `t` with `floor <= t <= clock`. Both read-only and read-write opens
+  enter the check. The WAL sync in `CkBackfill` raises `floor` to the highest
+  timestamp it covers. In the hypothetical pager sync control, `CkCommit`
+  raises it too. The upper bound includes a commit in flight. When recovery
+  finishes, `GoRun` resets `truth`, `hist` and `floor` to the recovered state.
 - `NoLeak`: after a checkpoint succeeds, no chain is left whose every version
   has its last event at or below the snapshot. GC runs with no open snapshot
   in the model, so the B-tree holds that row. After a blocking checkpoint with no
   failed pass before it, the store is empty (`DESIGN-rows.md`, "Mode B").
 
-## Results
+## Historical results before removing the checkpoint log sync
+
+These runs use the model before Turso's `d52ed55ca` change. The current
+profiles and replay commands are below.
 
 Bounds: one key, `MaxTs = 3`, two checkpoints, one crash, one checkpoint
 failure. `twoCrashes` has two crashes and `MaxTs = 2`. The state counts come
@@ -175,12 +178,12 @@ from `make check` and `make variants` with `SPECS=MvccRecovery`.
 | `issue7480Fixed` | no error | 4,004 | PR #9770 fixes it |
 | `issue9749` | `OpenSucceeds` fails | 1,270 | An open with the flag off after a passive checkpoint. Known |
 | `issue9749Fixed` | no error | 10,356 | PR #9770 fixes it |
-| `leadA` | `OpenSucceeds` fails | 1,270 | A passive database that closed cleanly keeps WAL frames. A read-only open refuses. A Rust test fails on current code |
+| `leadA` | `OpenSucceeds` fails | 1,270 | A passive database that closed cleanly keeps WAL frames. A read-only open refuses. A Rust test failed on that engine revision |
 | `leadB` | `OpenSucceedsWithWal` fails | 1,478 | A torn first header write after a passive checkpoint. Every open refuses, but the WAL holds every committed row. Case 3 states this refusal as intended. Needs a header write that tears into bytes that do not decode (not verified). Not reproduced as a crash |
 | `leadBStated` | no error | 65,920 | Lead B with the stated refusals allowed |
 | `leadBZeros` | no error | 59,155 | If a torn header reads as zeros, the open completes the checkpoint |
 | `idea1` | `RecoveryCorrect` fails | 425 | One timestamp for every replayed version brings back a deleted row |
-| `idea2` | `NoLeak` fails | 900 | A blocking checkpoint that fails after its publish leaves its versions unstamped. A Rust test fails on current code |
+| `idea2` | `NoLeak` fails | 900 | A blocking checkpoint that fails after its publish leaves its versions unstamped. A Rust test failed on that engine revision |
 | `idea2Passive` | `NoLeak` fails | 5,182 | The same in passive mode. The precondition audit shows it in Rust |
 | `idea2Fixed` | no error | 1,423 | `FixBlockingStoreEmpty` |
 | `idea2PassiveFixed` | no error | 42,233 | `FixStampBelowBoundary` |
@@ -192,7 +195,7 @@ from `make check` and `make variants` with `SPECS=MvccRecovery`.
 | `normalBackfillSkipFixed` | no error | 1,971,692 | `FixCkCommitSyncsWal` |
 | `fullBackfillSkip` | no error | 617,950 | Control: the same skip under FULL |
 
-The new variables `hist` and `floor` stay constant under FULL, and `walDisk`
+The variables `hist` and `floor` stay constant under FULL, and `walDisk`
 always equals the WAL length. The counts for failing configs and witnesses
 changed, because the new variables change the search order. Passing configs
 keep their counts. The run of 2026-11-18 on the Mac checked all 54 configs and
@@ -244,11 +247,10 @@ check. A witness requires the full dangerous state, not only an action:
   rows. `repairLeadBZeros` also requires that the last crash tore the header
   of a first append while the WAL had frames.
 
-## Rust results
+## Historical Rust results
 
-The tests are in local scratch files of the author, with commands and output
-in a `RESULTS.md` file. They are not committed, because they fail on current
-code.
+The tests below came from the initial recovery model. `FINDINGS.md` records
+their engine revisions and any reruns.
 
 - `leadA`: a read-only open after a clean close fails with "Cannot reconcile
   interrupted MVCC checkpoint in read-only mode".
@@ -257,17 +259,61 @@ code.
 - `logTruncError`: a `LogicalLog` unit test makes the truncate call fail, then
   appends a frame. A reader sees 1 frame, not 2. The test drives the log
   directly, not a full commit and crash through SQL.
-- `normalBackfillSkip`: the patch `harness/repro/passive-checkpoint-normal-power-loss.patch`
-  adds three tests on turso main `740300d9d`. With `synchronous=NORMAL`, a
-  pinned reader and a passive checkpoint, a power loss loses the committed row.
-  It also loses a row that a FULL commit made durable. Both tests fail in 3 of
-  3 runs. The control passes.
+- `normalBackfillSkip`: the tests in
+  `harness/repro/passive-checkpoint-normal-power-loss.patch` found both
+  NORMAL and FULL commit loss on Turso main `740300d9d`. Row 29 in
+  `FINDINGS.md` records that the FULL test passed on `67717af53` after
+  removal of the log sync. The same test discards the unsynced truncate
+  along with the unsynced WAL writes.
 - `leadB`: not reproduced as a crash. The test writes a damaged log image and
   shows that the open refuses it, which `RECOVERY_SEMANTICS.md` case 3 states
   as intended.
 - `logTruncSplit`: a hypothesis for an async backend such as io_uring. The
   Unix truncate completes in the submit call (`core/io/unix.rs:500`), so it
   cannot reorder. Not shown in Rust.
+
+## Checks after removing the checkpoint log sync
+
+`normalBackfillSkip` checks the same prefix rule as `normalPassive`. A
+successful zero-frame pass leaves the previous durability floor in place.
+The old `reachFsyncCoversUnacked` and `reachPublishDurableNormal` witnesses
+belong to the removed checkpoint action.
+
+The read-only open profiles expose the refusal of WAL-backed files, as in
+`leadA`. The read-write control enables the passive flag and allows the
+stated invalid-header refusals. The strict read-write profile checks those
+refusals as counterexamples. The two `NoLeak` profiles use full backfill
+and no live snapshots. A skipped backfill in Turso retains unbackfilled
+versions using its WAL backfill boundary (`checkpoint.rs:3392-3402`,
+`mod.rs:8642-8681`).
+
+| Check | TLC result | Distinct states |
+|---|---|---:|
+| `normal` | Pass | 198,762 |
+| `normalPassive` | Pass | 338,859 |
+| `normalBackfillSkip` | Pass | 606,202 |
+| `normalBackfillSkipFixed` | Pass | 474,270 |
+| `fullBackfillSkip` | Pass | 321,032 |
+| `normalReadOnlyOpen` | `OpenSucceeds` fails as expected | 291 |
+| `normalReadOnlyOpenWithWal` | `OpenSucceedsWithWal` fails as expected | 276 |
+| `normalReadWriteOpenStrict` | `OpenSucceedsStrict` fails as expected | 44 |
+| `normalReadWriteOpen` | Pass | 530,119 |
+| `normalNoLeak` | `NoLeak` fails as expected | 3,396 |
+| `normalNoLeakFixed` | Pass | 20,207 |
+
+All 59 recovery profiles returned their expected results on macOS. The
+table uses the targeted run. The count at the first counterexample can vary
+with the search order. All four deterministic Quint replays passed. The FULL-commit pinned-reader
+test from row 29 and both power-loss controls passed on Turso main
+`172b828a9` using the existing test patch. The controls cover FULL with
+a pinned reader and NORMAL with backfill.
+
+```sh
+cd specs
+make recovery
+quint test RecoveryTests.qnt --main recoveryFullTests --max-samples 1
+quint test RecoveryTests.qnt --main recoveryNormalTests --max-samples 1
+```
 
 ## What the model leaves out
 

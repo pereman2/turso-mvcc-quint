@@ -805,34 +805,6 @@ module reachCommitInPublishWindow {
   ).* from "./MvccRecovery"
 }
 
-// Expect NeverFsyncCoversUnacked to fail: in mainPassive the checkpoint log
-// fsync makes an unacknowledged append durable.
-// Invariants: NeverFsyncCoversUnacked
-module reachFsyncCoversUnacked {
-  import MvccRecovery(
-    Keys = Set("a"),
-    MaxTs = 3,
-    MaxCheckpoints = 2,
-    MaxCrashes = 1,
-    MaxFails = 1,
-    InitFlag = true,
-    OpenFlags = Set(false, true),
-    OpenReadOnly = Set(false, true),
-    CheckpointKinds = Set("blocking", "passive", "truncflag"),
-    CrashOnlyWhenIdle = false,
-    TornHeaderGarbage = true,
-    Fix9770 = false,
-    FixBlockingStoreEmpty = false,
-    RecoveryOneTs = false,
-    FixStampBelowBoundary = false,
-    AsyncLogTruncate = false,
-    LogTruncateErrors = false,
-    SyncMode = "full",
-    PassiveBackfillSkips = false,
-    FixCkCommitSyncsWal = false
-  ).* from "./MvccRecovery"
-}
-
 // Expect NeverStampFixUsed to fail: in fixed, a checkpoint fails after its
 // publish and a later checkpoint stamps those rows with the fix.
 // Invariants: NeverStampFixUsed
@@ -1312,12 +1284,9 @@ module normalPassive {
   ).* from "./MvccRecovery"
 }
 
-// Expect NormalPrefix to fail: as normalPassive, and a passive backfill can
-// copy no frame (a pinned reader or Busy). The pager commit of the checkpoint
-// does not fsync the WAL under NORMAL, and no backfill fsyncs it, so the
-// checkpoint truncates the log durably and loses its own rows on power loss.
-// Gap 19, a predicted engine bug.
-// Invariants: NormalPrefix
+// Expect no error: as normalPassive, and a passive backfill can copy no
+// frame. The skipped pass does not raise the durability floor.
+// Invariants: TypeOK RunCorrect NormalPrefix
 module normalBackfillSkip {
   import MvccRecovery(
     Keys = Set("a"),
@@ -1399,6 +1368,168 @@ module fullBackfillSkip {
   ).* from "./MvccRecovery"
 }
 
+// Expect OpenSucceeds to fail: A read-only open cannot reconcile committed WAL frames.
+// Invariants: OpenSucceeds
+module normalReadOnlyOpen {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect OpenSucceedsWithWal to fail: With a valid or absent header, read-only still refuses WAL-backed files.
+// Invariants: OpenSucceedsWithWal
+module normalReadOnlyOpenWithWal {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false, true),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = false,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect OpenSucceedsStrict to fail: An invalid header can block a read-write open.
+// Invariants: OpenSucceedsStrict
+module normalReadWriteOpenStrict {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: With the passive flag on, read-write reconciles an absent header.
+// Invariants: OpenSucceeds
+module normalReadWriteOpen {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 1,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking", "passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = true,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect NoLeak to fail: idea2Passive under NORMAL with full backfill.
+// Invariants: NoLeak
+module normalNoLeak {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 0,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
+// Expect no error: normalNoLeak with FixStampBelowBoundary.
+// Invariants: TypeOK RunCorrect NoLeak
+module normalNoLeakFixed {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 3,
+    MaxCheckpoints = 2,
+    MaxCrashes = 0,
+    MaxFails = 1,
+    InitFlag = true,
+    OpenFlags = Set(true),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("passive", "truncflag"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = false,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = true,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+}
+
 // Expect NeverLostUnsynced to fail: under NORMAL a crash that keeps only
 // fsynced data drops an acknowledged commit or an unsynced WAL frame.
 // Invariants: NeverLostUnsynced
@@ -1431,35 +1562,6 @@ module reachNormalLoss {
 // while WAL frames exist (normalBackfillSkip).
 // Invariants: NeverBackfillSkipped
 module reachBackfillSkipped {
-  import MvccRecovery(
-    Keys = Set("a"),
-    MaxTs = 3,
-    MaxCheckpoints = 2,
-    MaxCrashes = 1,
-    MaxFails = 1,
-    InitFlag = true,
-    OpenFlags = Set(false, true),
-    OpenReadOnly = Set(false, true),
-    CheckpointKinds = Set("blocking", "passive", "truncflag"),
-    CrashOnlyWhenIdle = false,
-    TornHeaderGarbage = true,
-    Fix9770 = false,
-    FixBlockingStoreEmpty = false,
-    RecoveryOneTs = false,
-    FixStampBelowBoundary = false,
-    AsyncLogTruncate = false,
-    LogTruncateErrors = false,
-    SyncMode = "normal",
-    PassiveBackfillSkips = true,
-    FixCkCommitSyncsWal = false
-  ).* from "./MvccRecovery"
-}
-
-// Expect NeverPublishDurableNormal to fail: under NORMAL a checkpoint fsyncs
-// the log while a commit is in flight, so the commit is durable when it
-// publishes and floor reaches its timestamp.
-// Invariants: NeverPublishDurableNormal
-module reachPublishDurableNormal {
   import MvccRecovery(
     Keys = Set("a"),
     MaxTs = 3,

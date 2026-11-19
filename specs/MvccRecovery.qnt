@@ -13,7 +13,7 @@
  * the pager commit of a checkpoint does not fsync the WAL; only the backfill
  * does). Under NORMAL a crash can lose acknowledged commits, so the promise
  * is NormalPrefix: recovery gives the rows of one commit point, no older than
- * the last point that a checkpoint or a log fsync made durable. A passive
+ * the last point that a WAL sync or a recovery made durable. A passive
  * backfill can copy no frame (a pinned reader or Busy). The checkpoint kinds are the ones that automatic
  * checkpoints, Connection::checkpoint and PRAGMA wal_checkpoint(PASSIVE or
  * TRUNCATE) start. An explicit FULL or RESTART checkpoint maps to TRUNCATE
@@ -45,7 +45,7 @@
  *                WAL frame), Publish (durable_txid_max advances), Backfill,
  *                SyncDb, TruncLog (locked decision, writer reset and
  *                truncate submit), TruncDone (only for an async backend),
- *                FsyncLog, TruncWal, Gc.
+ *                TruncWal, Gc.
  *   CkFail       An error or an abandoned checkpoint at one of the steps
  *                Commit to TruncWal. The checkpoint stops without GC, and a
  *                committed WAL frame stays. A truncate error (only with
@@ -181,9 +181,8 @@ module MvccRecovery {
   var seen: Set[str]            // Events, for the reachability checks.
   // Used under NORMAL only. Under FULL they keep their start value.
   var hist: int -> (str -> int) // The committed rows after each timestamp.
-  var floor: int                // The newest timestamp that the engine promised
-                                // durable (a checkpoint returned OK, or a log
-                                // fsync covered the commit).
+  var floor: int                // The newest timestamp made durable by a WAL sync
+                                // or recovered at open.
 
   // ---------------------------------------------------------------- helpers
 
@@ -395,23 +394,19 @@ module MvccRecovery {
   }
 
   // The commit is acknowledged and its versions enter the store
-  // (core/mvcc/database/mod.rs:3629). Under NORMAL, a checkpoint can fsync the
-  // log while the commit is in flight. Then the record is durable and the
-  // commit is a promise, so floor reaches its timestamp.
+  // (core/mvcc/database/mod.rs:3629).
   action CommitPublish = all {
     mode == "run",
     cm.on and cm.stage == "synced",
     val r = cm.rec
-    val durableNow = normal and lg.disk.select(x => x == r).length() > 0
     all {
-      hist' = hist,
-      floor' = if (durableNow) maxI(floor, r.ts) else floor,
+      hist' = hist, floor' = floor,
       store' = store.set(r.k, applyRec(store.get(r.k), r, r.ts)),
       truth' = truth.set(r.k, r.v),
       cm' = { ...cm, on: false, stage: "" },
       leakSnap' = -1,
-      seen' = (if (ck.pc == "publish" and ck.nonempty) seen.union(Set("CommitInPublishWindow"))
-               else seen).union(if (durableNow and r.ts > floor) Set("PublishDurableNormal") else Set()),
+      seen' = if (ck.pc == "publish" and ck.nonempty) seen.union(Set("CommitInPublishWindow"))
+              else seen,
       mode' = mode, flag' = flag, clock' = clock, durable' = durable, lg' = lg, fs' = fs,
       ck' = ck, op' = op, cnt' = cnt, replayTop' = replayTop,
     }
@@ -460,7 +455,8 @@ module MvccRecovery {
                          else fs.walDisk }
             else fs,
       ck' = { ...ck, pc: if (ck.nonempty) "publish" else "backfill" },
-      hist' = hist, floor' = floor,
+      hist' = hist,
+      floor' = if (normal and ck.nonempty and FixCkCommitSyncsWal) maxI(floor, ck.snap) else floor,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -494,10 +490,12 @@ module MvccRecovery {
   action CkBackfill = all {
     mode == "run",
     ck.pc == "backfill",
+    val boundary = lastMeta(fs.metaMem, fs.wal)
     all {
-      fs' = { ...fs, walDisk: fs.wal.length(), dbMem: applyFrames(fs.dbMem, fs.wal), metaMem: lastMeta(fs.metaMem, fs.wal) },
+      fs' = { ...fs, walDisk: fs.wal.length(), dbMem: applyFrames(fs.dbMem, fs.wal), metaMem: boundary },
       ck' = { ...ck, pc: "syncdb" },
-      hist' = hist, floor' = floor,
+      hist' = hist,
+      floor' = if (normal and fs.wal.length() > 0) maxI(floor, boundary) else floor,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, lg' = lg, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen,
@@ -557,7 +555,7 @@ module MvccRecovery {
               { ...lg, off0: true, crcReset: false, maxApp: 0, truncPend: true, appSince: false }
             else { ...lg, file: List(), hfile: "None", off0: true, crcReset: false, maxApp: 0 },
       ck' = { ...ck, clears: clears,
-              pc: if (clears and AsyncLogTruncate) "truncwait" else "fsynclog" },
+              pc: if (clears and AsyncLogTruncate) "truncwait" else "truncwal" },
       seen' = if (clears) seen else seen.union(Set("LogRetained")),
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
@@ -577,34 +575,8 @@ module MvccRecovery {
       lg' = { ...lg, truncPend: false, appSince: false,
               file: if (lg.appSince and not(eraseNew)) lg.file else List(),
               hfile: if (lg.appSince and not(eraseNew)) lg.hfile else "None" },
-      ck' = { ...ck, pc: "fsynclog" },
-      seen' = if (eraseNew) seen.union(Set("AppendErased")) else seen,
-      mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
-      durable' = durable, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
-      leakSnap' = leakSnap, replayTop' = replayTop,
-    }
-  }
-
-  // The log fsync of the checkpoint (checkpoint_state_machine.rs:3359). It
-  // makes every completed write durable, also the append of a commit that
-  // is not yet acknowledged.
-  action CkFsyncLog = all {
-    mode == "run",
-    ck.pc == "fsynclog",
-    val notDone = cm.on and cm.stage == "submitted"
-    all {
-      lg' = { ...lg,
-              disk: if (notDone) lg.file.select(r => r != cm.rec) else lg.file,
-              hdisk: if (notDone and cm.hdr) "None" else lg.hfile },
       ck' = { ...ck, pc: "truncwal" },
-      // Under NORMAL this fsync makes every acknowledged frame of the log
-      // durable, so the engine now stands for them.
-      floor' = if (normal) maxI(floor, maxOf(lg.file.foldl(Set(), (a, r) =>
-                 if (r.ts <= lastAcked) a.union(Set(r.ts)) else a)))
-               else floor,
-      hist' = hist,
-      seen' = if (cm.on and cm.stage == "appended") seen.union(Set("FsyncCoversUnacked"))
-              else seen,
+      seen' = if (eraseNew) seen.union(Set("AppendErased")) else seen,
       mode' = mode, flag' = flag, clock' = clock, truth' = truth, store' = store,
       durable' = durable, fs' = fs, cm' = cm, op' = op, cnt' = cnt,
       leakSnap' = leakSnap, replayTop' = replayTop,
@@ -643,9 +615,7 @@ module MvccRecovery {
       store' = after,
       ck' = ckIdle,
       leakSnap' = ck.snap,
-      // The checkpoint returned OK: the engine promises snapshot snap.
-      floor' = if (normal) maxI(floor, ck.snap) else floor,
-      hist' = hist,
+      hist' = hist, floor' = floor,
       seen' = seen
         .union(if (fixUsed) Set("StampFixUsed") else Set())
         .union(if (ck.kind == "truncflag" and ck.nonempty) Set("TruncFlagDone") else Set()),
@@ -664,10 +634,10 @@ module MvccRecovery {
   action CkFail = all {
     mode == "run",
     cnt.fail < MaxFails,
-    Set("commit", "publish", "backfill", "syncdb", "truncwait", "fsynclog", "truncwal")
+    Set("commit", "publish", "backfill", "syncdb", "truncwait", "truncwal")
       .contains(ck.pc) or (ck.pc == "trunclog" and LogTruncateErrors),
     val truncErr = ck.pc == "trunclog" and (ck.kind == "blocking" or lg.maxApp <= ck.snap)
-    val afterPublish = Set("backfill", "syncdb", "trunclog", "truncwait", "fsynclog", "truncwal")
+    val afterPublish = Set("backfill", "syncdb", "trunclog", "truncwait", "truncwal")
       .contains(ck.pc) and ck.nonempty
     all {
       hist' = hist, floor' = floor,
@@ -720,7 +690,7 @@ module MvccRecovery {
     val tornFirstAppend = tornHdr and writeOpen and cm.hdr and fs.wal.length() > 0
     val tags = Set()
       .union(if (ck.kind == "blocking" and ck.nonempty and fs.wal.length() > 0
-                 and Set("truncwait", "fsynclog", "truncwal").contains(ck.pc) and hd == "None")
+                 and Set("truncwait", "truncwal").contains(ck.pc) and hd == "None")
                Set("CrashBlockingTruncWal") else Set())
       .union(if (not(cm.on) and ck.pc == "idle" and mode == "run") Set("CleanClose") else Set())
       .union(if (fs.wal.length() > 0 and hd == "None") Set("WalFramesNoLog") else Set())
@@ -898,7 +868,6 @@ module MvccRecovery {
     CkTruncLog,
     nondet eraseNew = Bool.oneOf()
     CkTruncDone(eraseNew),
-    CkFsyncLog,
     CkTruncWal,
     CkGc,
     CkFail,
@@ -933,15 +902,15 @@ module MvccRecovery {
 
   // Under NORMAL a crash can lose acknowledged commits. An open that
   // succeeds still gives the rows of one commit point t, with floor <= t <=
-  // clock. floor is the newest point that a checkpoint or a log fsync made
+  // clock. floor is the newest point that a WAL sync or a recovery made
   // durable. t = clock can be the commit in flight.
   val NormalPrefix: bool =
     if (mode != "down") true
-    else OpenFlags.forall(f =>
-      val rb = openOutcome(f, false)
+    else OpenFlags.forall(f => OpenReadOnly.forall(ro =>
+      val rb = openOutcome(f, ro)
       rb.ok implies
         hist.keys().exists(t => t >= floor and t <= clock
-                                and hist.get(t) == rebuildReads(rb, Keys)))
+                                and hist.get(t) == rebuildReads(rb, Keys))))
 
   // Refusals that RECOVERY_SEMANTICS.md states as intended.
   pure val StatedRefusals = Set("case3", "case5")
@@ -990,8 +959,6 @@ module MvccRecovery {
   val NeverFailBeforePublish: bool = not(seen.contains("FailBeforePublish"))
   // A commit is acknowledged while a checkpoint with rows waits to publish.
   val NeverCommitInPublishWindow: bool = not(seen.contains("CommitInPublishWindow"))
-  // The checkpoint log fsync makes an unacknowledged append durable.
-  val NeverFsyncCoversUnacked: bool = not(seen.contains("FsyncCoversUnacked"))
   // A fix stamps a chain outside the write set (the repair runs).
   val NeverStampFixUsed: bool = not(seen.contains("StampFixUsed"))
   // An open that started on WAL frames and no log header finishes recovery
@@ -1006,7 +973,6 @@ module MvccRecovery {
   // A checkpoint after an open writes the replayed rows.
   val NeverCkOfReplayedRows: bool = not(seen.contains("CkOfReplayedRows"))
   // A passive backfill copies no frame while WAL frames exist.
-  val NeverPublishDurableNormal: bool = not(seen.contains("PublishDurableNormal"))
   val NeverBackfillSkipped: bool = not(seen.contains("BackfillSkipped"))
   // The same while some WAL frame is not durable.
   val NeverBackfillSkippedUnsynced: bool = not(seen.contains("BackfillSkippedUnsynced"))
