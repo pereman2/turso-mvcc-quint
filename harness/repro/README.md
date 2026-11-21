@@ -1,7 +1,7 @@
 # Engine reproducers
 
-Each patch here adds Rust tests to a turso checkout. Each test reproduces a
-row of `docs/FINDINGS.md` and fails on turso main.
+Each patch here adds Rust tests to a Turso checkout. The tests reproduce
+findings or check model behavior against the engine.
 
 ## group-commit-rows-21-22.patch
 

@@ -454,12 +454,64 @@ quint test RecoveryTests.qnt --main recoveryFullReaderTests --max-samples 1
 quint test RecoveryTests.qnt --main recoveryNormalReaderTests --max-samples 1
 ```
 
+## Copy before a failed TRUNCATE
+
+This slice covers flag-off MVCC under FULL and NORMAL with one row and
+a pager-only pin on a separate connection. An ordinary flag-off reader
+takes the checkpoint gate before pinning its pager. A direct pager pin
+skips the gate. The checkpoint can take the gate, commit pages to the
+WAL, and publish the MVCC durable timestamp with that pin still held
+(Turso main `936484848`, `core/mvcc/database/mod.rs:6555-6575` and
+`checkpoint.rs:2433-2455,2108-2111,3210-3253`).
+
+A DB-file pin at slot 0 makes WAL lock acquisition return `Busy`
+before the copy. A WAL pin caps the copy at its mark. For a nonempty
+copy, the checkpoint syncs the whole WAL file before it writes DB
+pages. The result returns `Busy` if the copy stops below the WAL end.
+A pin at the tail also returns `Busy` when the checkpoint tries to
+restart the WAL (`core/storage/wal.rs:1158-1170,1206-1245,5024-5124,5213-5249`).
+
+`PagerPin` shares the copy limit with the existing reader actions
+and holds no MVCC snapshot. `CkBackfill` moves a blocking pass with
+this pin to `backfillbusy`. A copy advances the NORMAL durability
+floor and changes the DB page cache. `CkFail` releases the checkpoint
+gate. It skips DB sync, backfill publication, both truncates and
+version GC (`checkpoint.rs:3288-3354`, `wal.rs:4344-4347`). Power loss
+can keep or discard the dirty DB pages. Recovery uses the durable WAL
+in both cases.
+
+In the replay, slot 0 first blocks the copy of the insert of value 1.
+The next pin holds the end of that WAL batch. After an update to value
+2, the second pass syncs both batches, copies through the pin, then
+returns `Busy`. The DB page cache holds 1 and its durable image still
+has no row. Under FULL the old logical log survives and recovery skips
+its two records. Under NORMAL the durable WAL supplies both batches
+when power loss drops the unsynced log. A fresh connection reads 2
+after either open. A separate run releases the pin and retries
+TRUNCATE. The retry empties the WAL and leaves value 2 in the DB file.
+
+TLC found no violation in 43,429 states under FULL and 84,575 states
+under NORMAL. Both profiles bound the model at two commits, three
+checkpoints, two failures and one crash. The eight directed runs
+check two crash images, a live retry, and a pin at the WAL tail. The
+20 existing recovery runs pass. Limiting the WAL sync to the copied
+prefix makes the NORMAL recovery replay fail at its WAL durability
+assertion.
+
+```sh
+cd specs
+make variants SPECS=MvccRecovery ONLY="fullFailedTruncate normalFailedTruncate"
+quint test RecoveryTests.qnt --main recoveryFullFailedTruncateTests --max-samples 1
+quint test RecoveryTests.qnt --main recoveryNormalFailedTruncateTests --max-samples 1
+```
+
 ## What the model leaves out
 
 - Multiple readers, reader upgrades, preparing dependencies, writer pins,
   and the interval between unregistering a reader and releasing its pin.
-- A checkpoint on the reader's own connection, partial backfill in a
-  failed TRUNCATE pass, and restart-on-write of a fully backfilled WAL.
+- A checkpoint on the reader's own connection, flag-on TRUNCATE with a
+  reader or pager pin, per-page I/O failures during backfill, and
+  restart-on-write of a fully backfilled WAL.
 - Schema changes, root pages, indexes and aborts.
 - SyncMode OFF. No fsync runs, so a power loss gives no promise.
 - Mixed sync modes per connection (`needs_full_sync`, `mod.rs:1957`).

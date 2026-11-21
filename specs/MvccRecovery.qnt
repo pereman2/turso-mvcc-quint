@@ -48,10 +48,12 @@
  *                TruncWal, Gc.
  *   Reader       NextWithReader lets one user reader pin the DB file or WAL,
  *                register a logical snapshot, and release both on end.
- *   CkFail       An error or an abandoned checkpoint at one of the steps
- *                Commit to TruncWal. The checkpoint stops without GC, and a
- *                committed WAL frame stays. A truncate error (only with
- *                LogTruncateErrors) keeps the writer offset but resets the
+ *                NextWithPagerPin covers a direct pager pin in blocking mode.
+ *   CkFail       An error or an abandoned checkpoint between Commit and
+ *                TruncWal leaves committed WAL frames and skips GC. A
+ *                blocking pass can copy through a pinned WAL mark before
+ *                Busy, without syncing the DB file. With LogTruncateErrors,
+ *                a truncate error keeps the writer offset but resets the
  *                running CRC, as the Unix backend does.
  *   Crash        Keeps fsynced data. An unsynced write is lost, kept or
  *                torn. A torn header write can tear the log header.
@@ -310,6 +312,7 @@ module MvccRecovery {
                              snapshot: { ts: -1, rows: Keys.mapBy(k => 0) } }
   val readerHeld: bool = reader.phase != "idle"
   val readerActive: bool = reader.phase == "active"
+  val readerPagerOnly: bool = reader.phase == "pagerOnly"
   val readerLwm: int = if (readerActive) reader.snapshot.ts else Inf
   val readerGcFloor: int =
     if (readerActive or (readerHeld and not(reader.dbFile))) minI(backfillFloor, reader.mark)
@@ -373,11 +376,18 @@ module MvccRecovery {
     leakSnap' = leakSnap, replayTop' = replayTop, seen' = seen, hist' = hist, floor' = floor,
   }
 
-  action ReaderPin = all {
+  action PinReader(phase: str): bool = all {
     mode == "run",
     not(readerHeld),
     not(commitsBlocked),
-    SetReader({ ...readerIdle, phase: "pinned", mark: walEnd, dbFile: backfillFloor == walEnd }),
+    SetReader({ ...readerIdle, phase: phase, mark: walEnd, dbFile: backfillFloor == walEnd }),
+  }
+
+  action ReaderPin = PinReader("pinned")
+
+  action PagerPin = all {
+    not(flag),
+    PinReader("pagerOnly"),
   }
 
   action ReaderBegin = all {
@@ -486,7 +496,7 @@ module MvccRecovery {
     cnt.ck < MaxCheckpoints,
     CheckpointKinds.contains(kind),
     if (flag) kind != "blocking" else kind == "blocking",
-    kind != "blocking" or (not(cm.on) and not(readerHeld)),
+    kind != "blocking" or (not(cm.on) and (not(readerHeld) or readerPagerOnly)),
     val snap = lastAcked
     val changed = Keys.filter(k => store.get(k).exists(x =>
       (x.b > durable and x.b <= snap) or (x.e > durable and x.e <= snap)))
@@ -556,6 +566,7 @@ module MvccRecovery {
     mode == "run",
     ck.pc == "backfill",
     fs.nBackfill <= upTo and upTo <= readerCopyLimit,
+    val busy = ck.kind == "blocking" and readerPagerOnly
     val copied = upTo > fs.nBackfill
     val frames = fs.wal.slice(fs.nBackfill, upTo)
     all {
@@ -563,7 +574,8 @@ module MvccRecovery {
               { ...fs, walDisk: fs.wal.length(), dbMem: applyFrames(fs.dbMem, frames),
                 metaMem: lastMeta(fs.metaMem, frames) }
             else fs,
-      ck' = { ...ck, pc: if (copied) "syncdb" else "trunclog", copiedThrough: upTo },
+      ck' = { ...ck, pc: if (busy) "backfillbusy" else if (copied) "syncdb" else "trunclog",
+              copiedThrough: upTo },
       hist' = hist,
       floor' = if (normal and copied) maxI(floor, lastMeta(fs.metaMem, fs.wal)) else floor,
       reader' = reader,
@@ -720,10 +732,10 @@ module MvccRecovery {
   action CkFail = all {
     mode == "run",
     cnt.fail < MaxFails,
-    Set("commit", "publish", "backfill", "syncdb", "truncwait", "truncwal")
+    Set("commit", "publish", "backfill", "backfillbusy", "syncdb", "truncwait", "truncwal")
       .contains(ck.pc) or (ck.pc == "trunclog" and LogTruncateErrors),
     val truncErr = ck.pc == "trunclog" and (ck.kind == "blocking" or lg.maxApp <= ck.snap)
-    val afterPublish = Set("backfill", "syncdb", "trunclog", "truncwait", "truncwal")
+    val afterPublish = Set("backfill", "backfillbusy", "syncdb", "trunclog", "truncwait", "truncwal")
       .contains(ck.pc) and ck.nonempty
     all {
       hist' = hist, floor' = floor,
@@ -1028,6 +1040,12 @@ module MvccRecovery {
     all { not(cm.on), CkGc },
   }
 
+  action NextWithPagerPin = any {
+    Next,
+    PagerPin,
+    ReaderEnd,
+  }
+
   // -------------------------------------------------------------- invariants
 
   val TypeOK: bool = Set("run", "open", "down").contains(mode) and clock <= MaxTs
@@ -1041,13 +1059,21 @@ module MvccRecovery {
   val ReaderPinCorrect: bool = readerHeld implies all {
     backfillFloor <= reader.mark and reader.mark <= walEnd,
     reader.dbFile implies backfillFloor == reader.mark,
-    ck.pc == "syncdb" implies fs.walBase + ck.copiedThrough <= reader.mark,
+    Set("syncdb", "backfillbusy").contains(ck.pc) implies
+      fs.walBase + ck.copiedThrough <= reader.mark,
   }
 
   val ReaderLifecycleCorrect: bool = all {
-    Set("idle", "pinned", "active").contains(reader.phase),
+    Set("idle", "pinned", "active", "pagerOnly").contains(reader.phase),
     (mode != "run" or not(readerHeld)) implies reader == readerIdle,
-    readerHeld implies not(commitsBlocked),
+    (readerHeld and not(readerPagerOnly)) implies not(commitsBlocked),
+    readerPagerOnly implies not(flag),
+  }
+
+  val BusyBackfillCorrect: bool = ck.pc == "backfillbusy" implies all {
+    ck.kind == "blocking",
+    fs.nBackfill <= ck.copiedThrough and ck.copiedThrough <= fs.wal.length(),
+    ck.copiedThrough > fs.nBackfill implies fs.walDisk == fs.wal.length(),
   }
 
   // Every open the user can pick that succeeds gives the committed rows.

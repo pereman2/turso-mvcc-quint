@@ -1374,6 +1374,82 @@ module normalPartialBackfill {
   val OpenSucceeds = Recovery::OpenSucceeds
 }
 
+// Expect no error under FULL when a pager-only pin makes TRUNCATE fail.
+// Invariants: TypeOK RecoveryCorrect DbFileReadsCorrect OpenSucceeds ReaderPinCorrect ReaderLifecycleCorrect BusyBackfillCorrect
+module fullFailedTruncate {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 3,
+    MaxCrashes = 1,
+    MaxFails = 2,
+    InitFlag = false,
+    OpenFlags = Set(false),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "full",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ) as Recovery from "./MvccRecovery"
+
+  action Init = Recovery::Init
+  action Next = Recovery::NextWithPagerPin
+  val TypeOK = Recovery::TypeOK
+  val RecoveryCorrect = Recovery::RecoveryCorrect
+  val DbFileReadsCorrect = Recovery::DbFileReadsCorrect
+  val OpenSucceeds = Recovery::OpenSucceeds
+  val ReaderPinCorrect = Recovery::ReaderPinCorrect
+  val ReaderLifecycleCorrect = Recovery::ReaderLifecycleCorrect
+  val BusyBackfillCorrect = Recovery::BusyBackfillCorrect
+}
+
+// Expect no error under NORMAL when a pager-only pin makes TRUNCATE fail.
+// Invariants: TypeOK RunCorrect NormalPrefix NormalRecoveryStable DbFileReadsCorrect OpenSucceeds ReaderPinCorrect ReaderLifecycleCorrect BusyBackfillCorrect
+module normalFailedTruncate {
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 3,
+    MaxCrashes = 1,
+    MaxFails = 2,
+    InitFlag = false,
+    OpenFlags = Set(false),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = "normal",
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ) as Recovery from "./MvccRecovery"
+
+  action Init = Recovery::Init
+  action Next = Recovery::NextWithPagerPin
+  val TypeOK = Recovery::TypeOK
+  val RunCorrect = Recovery::RunCorrect
+  val NormalPrefix = Recovery::NormalPrefix
+  val NormalRecoveryStable = Recovery::NormalRecoveryStable
+  val DbFileReadsCorrect = Recovery::DbFileReadsCorrect
+  val OpenSucceeds = Recovery::OpenSucceeds
+  val ReaderPinCorrect = Recovery::ReaderPinCorrect
+  val ReaderLifecycleCorrect = Recovery::ReaderLifecycleCorrect
+  val BusyBackfillCorrect = Recovery::BusyBackfillCorrect
+}
+
 // Expect no error under FULL with a user reader and passive checkpoint.
 // Invariants: TypeOK RecoveryCorrect DbFileReadsCorrect OpenSucceeds ReaderSnapshotCorrect ReaderPinCorrect ReaderLifecycleCorrect
 module fullWithReader {

@@ -450,3 +450,127 @@ module recoveryNormalReaderTests {
       .expect(reader.dbFile and reader.mark == 1 and readerReads.get("a") == 0
         and reader.snapshot == { ts: 2, rows: Map("a" -> 0) })
 }
+
+module recoveryFailedTruncate {
+  const Mode: str
+  import MvccRecovery(
+    Keys = Set("a"),
+    MaxTs = 2,
+    MaxCheckpoints = 3,
+    MaxCrashes = 1,
+    MaxFails = 2,
+    InitFlag = false,
+    OpenFlags = Set(false),
+    OpenReadOnly = Set(false),
+    CheckpointKinds = Set("blocking"),
+    CrashOnlyWhenIdle = false,
+    TornHeaderGarbage = true,
+    Fix9770 = true,
+    FixBlockingStoreEmpty = false,
+    RecoveryOneTs = false,
+    FixStampBelowBoundary = false,
+    AsyncLogTruncate = false,
+    LogTruncateErrors = false,
+    SyncMode = Mode,
+    PassiveBackfillSkips = false,
+    FixCkCommitSyncsWal = false
+  ).* from "./MvccRecovery"
+
+  action commit = CommitWrite("a", false).then(CommitAppendDone).then(CommitFsync).then(CommitPublish)
+
+  action writeCheckpoint = CkBegin("blocking").then(CkCommit).then(CkPublish)
+
+  action finishOpen = OpenStart(false).then(OpenBackfill).then(OpenSyncDb).then(OpenHeader)
+    .then(OpenFsyncLog).then(OpenTruncWal).then(OpenSyncWal).then(OpenFinish)
+    .expect(reader == readerIdle and clock == 2 and durable == 2 and replayTop == 0
+      and fs.metaDisk == 2 and fs.dbDisk.get("a") == 2 and fs.wal.length() == 0
+      and reads.get("a") == 2)
+
+  action slotZeroBusy =
+    Init
+      .then(PagerPin)
+      .expect(reader.dbFile)
+      .then(commit)
+      .then(writeCheckpoint)
+      .then(CkBackfill)
+      .expect(ck.pc == "backfillbusy" and ck.copiedThrough == 0
+        and fs.metaMem == 0 and fs.metaDisk == 0 and fs.nBackfill == 0
+        and fs.walDisk == (if (normal) 0 else 1))
+      .then(CkFail)
+      .then(ReaderEnd)
+
+  action partialCopy =
+    slotZeroBusy
+      .then(PagerPin)
+      .expect(not(reader.dbFile) and reader.mark == 2)
+      .then(commit)
+      .then(writeCheckpoint)
+      .then(CkBackfill)
+      .expect(ck.pc == "backfillbusy" and ck.copiedThrough == 1
+        and fs.dbMem.get("a") == 1 and fs.metaMem == 1
+        and fs.dbDisk.get("a") == 0 and fs.metaDisk == 0 and fs.nBackfill == 0
+        and fs.wal.length() == 2 and fs.walDisk == 2 and durable == 2
+        and floor == (if (normal) 2 else 0))
+
+  action partialBusy =
+    partialCopy
+      .then(CkFail)
+      .expect(ck == ckIdle and cnt.fail == 2 and lg.file.length() == 2
+        and lg.disk.length() == (if (normal) 0 else 2)
+        and fs.metaMem == 1 and fs.metaDisk == 0 and fs.nBackfill == 0
+        and store.get("a") == Set(
+          { b: 1, e: 2, v: 1, mat: 0, res: false },
+          { b: 2, e: Inf, v: 2, mat: 0, res: false })
+        and reads.get("a") == 2)
+
+  action reopenWithCopyLost =
+    partialBusy
+      .then(Crash("disk", false, false))
+      .expect(fs.metaDisk == 0 and fs.wal.length() == 2)
+      .then(finishOpen)
+
+  action reopenWithCopyKept =
+    partialCopy
+      .then(Crash("disk", true, false))
+      .expect(fs.metaDisk == 1 and fs.dbDisk.get("a") == 1 and fs.wal.length() == 2)
+      .then(finishOpen)
+
+  action retry =
+    partialBusy
+      .then(ReaderEnd)
+      .then(CkBegin("blocking"))
+      .expect(not(ck.nonempty))
+      .then(CkCommit.then(CkBackfill).then(CkSyncDb).then(CkTruncLog).then(CkTruncWal).then(CkGc))
+      .expect(ck == ckIdle and fs.metaDisk == 2 and fs.dbDisk.get("a") == 2
+        and fs.wal.length() == 0 and fs.nBackfill == 0 and lg.file.length() == 0
+        and reads.get("a") == 2)
+
+  action tailPin =
+    slotZeroBusy
+      .then(PagerPin)
+      .then(CkBegin("blocking").then(CkCommit))
+      .expect(not(ck.nonempty))
+      .then(CkBackfill)
+      .expect(ck.pc == "backfillbusy" and ck.copiedThrough == fs.wal.length()
+        and fs.wal.length() == 1 and fs.walDisk == 1 and fs.dbMem.get("a") == 1)
+      .then(CkFail)
+      .expect(ck == ckIdle and fs.metaDisk == 0 and fs.nBackfill == 0 and lg.file.length() == 1)
+}
+
+module recoveryFullFailedTruncateTests {
+  import recoveryFailedTruncate(Mode = "full").* from "./RecoveryTests"
+
+  run reopenWithCopyLostTest = reopenWithCopyLost
+  run reopenWithCopyKeptTest = reopenWithCopyKept
+  run retryTest = retry
+  run tailPinTest = tailPin
+}
+
+module recoveryNormalFailedTruncateTests {
+  import recoveryFailedTruncate(Mode = "normal").* from "./RecoveryTests"
+
+  run reopenWithCopyLostTest = reopenWithCopyLost
+  run reopenWithCopyKeptTest = reopenWithCopyKept
+  run retryTest = retry
+  run tailPinTest = tailPin
+}
