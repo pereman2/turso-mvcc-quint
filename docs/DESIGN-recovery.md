@@ -505,6 +505,37 @@ quint test RecoveryTests.qnt --main recoveryFullFailedTruncateTests --max-sample
 quint test RecoveryTests.qnt --main recoveryNormalFailedTruncateTests --max-samples 1
 ```
 
+### Engine replay of retained DB pages and a WAL tail pin
+
+The slice 6 replay covers the two flag-off Busy paths under FULL and
+NORMAL on Turso main `49c6966e7`. The first pass returns Busy under a
+DB-file pin and leaves the insert in the WAL. A new direct pager pin
+takes the mark for that insert. In the partial-copy case, an update
+extends the WAL beyond the pin and the next pass stops at the mark.
+In the tail case, there is no update. The copy reaches the tail, then
+`restart_log` returns Busy because it cannot lock the pinned mark
+exclusively (`core/storage/wal.rs:1158-1170,1206-1245,5213-5249,5397-5400`).
+
+The replay checks the copied frame bound and restart entry in the WAL
+trace. In both cases the DB file has dirty pages, published backfill is
+zero, the WAL is synced and neither log has been truncated. A DB-only
+copy contains row 1 and the insert checkpoint timestamp. The synced DB
+image still holds the schema checkpoint timestamp and has no row.
+
+The partial-copy crash keeps the dirty DB pages and only the synced WAL
+and logical log. The WAL must replace row 1 with row 2 and advance the
+checkpoint timestamp to the update. The tail crash keeps only synced
+bytes for all three files. The WAL must recover row 1 and the insert
+timestamp. In FULL, the retained logical log reaches its end during
+open without adding any MVCC row versions. In NORMAL, the unsynced log
+records are absent in the crash image. Both reopens empty the WAL.
+
+The Quint replays now crash after `CkFail` for the kept DB image and
+follow the tail Busy through reopen. They check the DB image, WAL,
+recovered row, checkpoint timestamp and zero logical-log replay. The
+state exploration still permits a crash before failure cleanup.
+See [the engine replay commands](../harness/repro/README.md#truncate-busy-recoverypatch).
+
 ## What the model leaves out
 
 - Multiple readers, reader upgrades, preparing dependencies, writer pins,

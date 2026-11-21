@@ -480,11 +480,11 @@ module recoveryFailedTruncate {
 
   action writeCheckpoint = CkBegin("blocking").then(CkCommit).then(CkPublish)
 
-  action finishOpen = OpenStart(false).then(OpenBackfill).then(OpenSyncDb).then(OpenHeader)
+  action finishOpen(expected: int): bool = OpenStart(false).then(OpenBackfill).then(OpenSyncDb).then(OpenHeader)
     .then(OpenFsyncLog).then(OpenTruncWal).then(OpenSyncWal).then(OpenFinish)
-    .expect(reader == readerIdle and clock == 2 and durable == 2 and replayTop == 0
-      and fs.metaDisk == 2 and fs.dbDisk.get("a") == 2 and fs.wal.length() == 0
-      and reads.get("a") == 2)
+    .expect(reader == readerIdle and clock == expected and durable == expected and replayTop == 0
+      and fs.metaDisk == expected and fs.dbDisk.get("a") == expected and fs.wal.length() == 0
+      and reads.get("a") == expected)
 
   action slotZeroBusy =
     Init
@@ -527,13 +527,13 @@ module recoveryFailedTruncate {
     partialBusy
       .then(Crash("disk", false, false))
       .expect(fs.metaDisk == 0 and fs.wal.length() == 2)
-      .then(finishOpen)
+      .then(finishOpen(2))
 
   action reopenWithCopyKept =
-    partialCopy
+    partialBusy
       .then(Crash("disk", true, false))
       .expect(fs.metaDisk == 1 and fs.dbDisk.get("a") == 1 and fs.wal.length() == 2)
-      .then(finishOpen)
+      .then(finishOpen(2))
 
   action retry =
     partialBusy
@@ -552,9 +552,15 @@ module recoveryFailedTruncate {
       .expect(not(ck.nonempty))
       .then(CkBackfill)
       .expect(ck.pc == "backfillbusy" and ck.copiedThrough == fs.wal.length()
-        and fs.wal.length() == 1 and fs.walDisk == 1 and fs.dbMem.get("a") == 1)
+        and fs.wal.length() == 1 and fs.walDisk == 1
+        and fs.dbMem.get("a") == 1 and fs.metaMem == 1
+        and fs.dbDisk.get("a") == 0 and fs.metaDisk == 0)
       .then(CkFail)
       .expect(ck == ckIdle and fs.metaDisk == 0 and fs.nBackfill == 0 and lg.file.length() == 1)
+      .then(Crash("disk", false, false))
+      .expect(fs.metaDisk == 0 and fs.wal.length() == 1
+        and lg.disk.length() == (if (normal) 0 else 1))
+      .then(finishOpen(1))
 }
 
 module recoveryFullFailedTruncateTests {

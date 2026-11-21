@@ -280,3 +280,29 @@ git -C <turso> apply <this repo>/harness/repro/wal-restart-floor.patch
 cd <turso>
 cargo test -p turso_core --lib probe_ -- --nocapture --test-threads=1
 ```
+
+## truncate-busy-recovery.patch
+
+The patch adds four integration tests to
+`tests/integration/mvcc/checkpoint.rs` on Turso main `49c6966e7`.
+They use a direct pager pin on a separate connection with the passive
+checkpoint flag off. In FULL and NORMAL they check two crash images.
+
+- Partial copy. TRUNCATE copies through the pin and returns Busy.
+  The crash keeps the dirty DB pages with value 1 and only the synced
+  WAL and logical log. A fresh open reads value 2.
+- Tail pin. TRUNCATE copies every frame and returns Busy at WAL restart.
+  The crash keeps only synced bytes. A fresh open reads value 1.
+
+Both cases check the recovered checkpoint timestamp and an empty WAL.
+Recovery reads the retained FULL logical log through its end and
+leaves zero in-memory row versions.
+
+```bash
+git -C <turso> checkout 49c6966e72f0d8993782cd0b11e49e4f9a11eeb4
+git -C <turso> apply <this repo>/harness/repro/truncate-busy-recovery.patch
+cd <turso>
+cargo test --locked -p core_tester --test integration_tests truncate_busy_recovery
+```
+
+All four tests passed on macOS.

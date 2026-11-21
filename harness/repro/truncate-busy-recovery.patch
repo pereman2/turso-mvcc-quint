@@ -1,0 +1,213 @@
+diff --git a/tests/integration/mvcc/checkpoint.rs b/tests/integration/mvcc/checkpoint.rs
+index 0f770d1f8..7b46bd5e8 100644
+--- a/tests/integration/mvcc/checkpoint.rs
++++ b/tests/integration/mvcc/checkpoint.rs
+@@ -2204,6 +2204,208 @@ fn truncate_checkpoint_is_busy_while_a_reader_transaction_is_open() {
+     writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+ }
+
++#[test]
++fn truncate_busy_recovery_keeps_partial_copy_full() {
++    replay_truncate_busy_recovery("FULL", BusyTruncate::PartialCopy);
++}
++
++#[test]
++fn truncate_busy_recovery_keeps_partial_copy_normal() {
++    replay_truncate_busy_recovery("NORMAL", BusyTruncate::PartialCopy);
++}
++
++#[test]
++fn truncate_busy_recovery_at_wal_tail_full() {
++    replay_truncate_busy_recovery("FULL", BusyTruncate::WalTail);
++}
++
++#[test]
++fn truncate_busy_recovery_at_wal_tail_normal() {
++    replay_truncate_busy_recovery("NORMAL", BusyTruncate::WalTail);
++}
++
++#[derive(Debug)]
++enum BusyTruncate {
++    PartialCopy,
++    WalTail,
++}
++
++fn replay_truncate_busy_recovery(sync_mode: &str, busy: BusyTruncate) {
++    use crate::unreliable_io::UnreliableIo;
++
++    let db_path = format!("truncate-busy-{sync_mode}-{busy:?}.db");
++    let wal_path = format!("{db_path}-wal");
++    let log_path = format!("{db_path}-log");
++    let partial = matches!(busy, BusyTruncate::PartialCopy);
++    let io = Arc::new(UnreliableIo::new());
++    let db = Database::open_file(io.clone(), &db_path, Arc::new(SqliteDialect)).unwrap();
++    let writer = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    assert!(!writer.experimental_mvcc_passive_checkpoint_enabled());
++    writer.pragma_update("journal_mode", "'mvcc'").unwrap();
++    writer.disable_mvcc_auto_checkpoint().unwrap();
++    writer
++        .execute("CREATE TABLE t(id INTEGER PRIMARY KEY, v INTEGER)")
++        .unwrap();
++    writer.checkpoint(TRUNCATE).unwrap();
++    io.mark_all_durable();
++    let baseline = io.durable_files();
++    let mv = writer.mv_store().as_ref().unwrap().clone();
++    let schema_ts = mv.debug_gc_snapshot().durable_txid_max;
++    writer
++        .execute(format!("PRAGMA synchronous={sync_mode}"))
++        .unwrap();
++
++    let reader = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    let pin = reader.get_pager();
++    let pager = writer.get_pager();
++    let log = mv.get_logical_log_file();
++    pin.begin_read_tx().unwrap();
++    assert_eq!(pin.wal_pos().1, 0);
++    writer.execute("INSERT INTO t VALUES (1, 1)").unwrap();
++    let insert_log_size = log.size().unwrap();
++    assert!(insert_log_size > 0);
++    let first = writer.checkpoint(TRUNCATE);
++    assert!(matches!(first, Err(LimboError::Busy)), "{first:?}");
++    assert_eq!(log.size().unwrap(), insert_log_size);
++    assert_eq!(pager.wal_backfill_frame(), Some(0));
++    assert!(!io.has_unsynced_writes(&db_path));
++    assert_eq!(io.has_unsynced_writes(&wal_path), sync_mode == "NORMAL");
++    let insert_ts = mv.debug_gc_snapshot().durable_txid_max;
++    assert!(insert_ts > schema_ts);
++    pin.end_read_tx();
++
++    pin.begin_read_tx().unwrap();
++    let mark = pin.wal_pos().1;
++    assert!(mark > 0);
++    assert_eq!(pager.wal_max_frame(), Some(mark));
++    if partial {
++        writer.execute("UPDATE t SET v = 2 WHERE id = 1").unwrap();
++    }
++    let log_size = log.size().unwrap();
++    assert_eq!(log_size > insert_log_size, partial);
++
++    let trace = tempfile::NamedTempFile::new().unwrap();
++    let subscriber = tracing_subscriber::fmt()
++        .without_time()
++        .with_ansi(false)
++        .with_env_filter("turso_core::storage::wal=debug")
++        .with_writer(trace.reopen().unwrap())
++        .finish();
++    let second = tracing::subscriber::with_default(subscriber, || writer.checkpoint(TRUNCATE));
++    assert!(matches!(second, Err(LimboError::Busy)), "{second:?}");
++    let tail = pager.wal_max_frame().unwrap();
++    if partial {
++        assert!(mark < tail);
++    } else {
++        assert_eq!(mark, tail);
++    }
++    let events = std::fs::read_to_string(trace.path()).unwrap();
++    let bounds = format!(
++        "checkpoint_result=CheckpointResult {{ wal_max_frame: {tail}, wal_total_backfilled: {mark},"
++    );
++    assert!(events.contains(&bounds), "{events}");
++    assert_eq!(
++        events.lines().any(|line| line.ends_with(" restart_log")),
++        !partial,
++        "{events}"
++    );
++
++    assert_eq!(pager.wal_backfill_frame(), Some(0));
++    assert_eq!(log.size().unwrap(), log_size);
++    assert!(io.has_unsynced_writes(&db_path));
++    assert!(!io.has_unsynced_writes(&wal_path));
++    let durable = io.durable_files();
++    assert_eq!(durable[&db_path], baseline[&db_path]);
++    assert!(!durable[&wal_path].is_empty());
++    let checkpoint_ts = mv.debug_gc_snapshot().durable_txid_max;
++    if partial {
++        assert!(checkpoint_ts > insert_ts);
++    } else {
++        assert_eq!(checkpoint_ts, insert_ts);
++    }
++    if sync_mode == "FULL" {
++        assert!(durable[&log_path].len() > baseline[&log_path].len());
++        assert_eq!(durable[&log_path], read_truncate_replay_file(&*io, &*log));
++    } else {
++        assert_eq!(durable[&log_path], baseline[&log_path]);
++        assert!(io.has_unsynced_writes(&log_path));
++    }
++
++    let live_db = io.open_file(&db_path, OpenFlags::None, false).unwrap();
++    let dirty = read_truncate_replay_file(&*io, &*live_db);
++    let (_settled_dir, settled) = open_truncate_replay_image(&durable[&db_path], &[]);
++    let rows: Vec<(i64,)> = settled.exec_rows("SELECT v FROM t");
++    assert!(rows.is_empty());
++    assert_eq!(truncate_replay_metadata(&settled), schema_ts);
++    let (_copied_dir, copied) = open_truncate_replay_image(&dirty, &[]);
++    let rows: Vec<(i64,)> = copied.exec_rows("SELECT v FROM t");
++    assert_eq!(rows, vec![(1,)]);
++    assert_eq!(truncate_replay_metadata(&copied), insert_ts);
++
++    let db_bytes = if partial { &dirty } else { &durable[&db_path] };
++    let (_recovered_dir, recovered) = open_truncate_replay_image(
++        db_bytes,
++        &[("-wal", &durable[&wal_path]), ("-log", &durable[&log_path])],
++    );
++    let rows: Vec<(i64,)> = recovered.exec_rows("SELECT v FROM t");
++    assert_eq!(rows, vec![(if partial { 2 } else { 1 },)]);
++    assert_eq!(recovered.get_pager().wal_max_frame(), Some(0));
++    assert_eq!(truncate_replay_metadata(&recovered), checkpoint_ts);
++    let state = recovered.mv_store().as_ref().unwrap().debug_gc_snapshot();
++    assert_eq!(state.durable_txid_max, checkpoint_ts);
++    assert_eq!(state.rows_versions, 0);
++    if sync_mode == "FULL" {
++        assert_eq!(state.logical_log_offset, log_size);
++    }
++    pin.end_read_tx();
++}
++
++fn read_truncate_replay_file(io: &dyn IO, file: &dyn turso_core::File) -> Vec<u8> {
++    use turso_core::{Buffer, Completion};
++
++    let bytes = Arc::new(Buffer::new_temporary(file.size().unwrap() as usize));
++    let completion = file
++        .pread(0, Completion::new_read(bytes.clone(), Box::new(|_| None)))
++        .unwrap();
++    io.wait_for_completion(completion).unwrap();
++    bytes.as_slice().to_vec()
++}
++
++fn open_truncate_replay_image(
++    db_bytes: &[u8],
++    sidecars: &[(&str, &[u8])],
++) -> (tempfile::TempDir, Arc<Connection>) {
++    let dir = tempfile::tempdir().unwrap();
++    let path = dir.path().join("replay.db");
++    std::fs::write(&path, db_bytes).unwrap();
++    for (suffix, bytes) in sidecars {
++        std::fs::write(dir.path().join(format!("replay.db{suffix}")), bytes).unwrap();
++    }
++    let db = Database::open_file(
++        Arc::new(PlatformIO::new().unwrap()),
++        path.to_str().unwrap(),
++        Arc::new(SqliteDialect),
++    )
++    .unwrap();
++    let conn = db
++        .connect(ConnectOpts::new(SessionRole::Superuser))
++        .unwrap();
++    (dir, conn)
++}
++
++fn truncate_replay_metadata(conn: &Arc<Connection>) -> u64 {
++    let metadata: Vec<(i64,)> =
++        conn.exec_rows("SELECT v FROM __turso_internal_mvcc_meta WHERE k = 'persistent_tx_ts_max'");
++    let [(timestamp,)] = metadata.as_slice() else {
++        panic!("expected one checkpoint timestamp, got {metadata:?}");
++    };
++    u64::try_from(*timestamp).unwrap()
++}
++
+ #[test]
+ fn late_commit_of_low_rowid_is_written_by_the_next_checkpoint() {
+     let mut db = MvccTestDbNoConn::new_with_random_db_passive();
